@@ -1,0 +1,188 @@
+//-----------------------------------------------------------------------------
+// GameTest.cpp - With OBJ Model Loading
+//-----------------------------------------------------------------------------
+#include "App.h"
+#include "AppSettings.h"
+#include "../Rendering/Camera3D.h"
+#include "../Rendering/Renderer3D.h"
+#include "../Rendering/Mesh3D.h"
+#include "../Systems/LightingSystem.h"
+#include "../Systems/Particle3D.h"
+#include "../UI/UIManager.h"
+#include "../Utilities/Logger.h"
+#include <cmath>
+#include <cstdlib>
+#include <ctime>
+
+//-----------------------------------------------------------------------------
+// Globals
+//-----------------------------------------------------------------------------
+Camera3D camera3D;
+Mesh3D cubeMesh;
+Mesh3D pyramidMesh;
+Mesh3D sphereMesh;
+Mesh3D planeMesh;
+Mesh3D objModel;
+ParticleSystem3D* particleSystem = nullptr;
+bool renderWireframe = false;
+float gameTime = 0.0f;
+float particleSpawnTimer = 0.0f;
+
+//-----------------------------------------------------------------------------
+// Init
+//-----------------------------------------------------------------------------
+void Init() {
+    srand((unsigned int)time(nullptr));
+
+    Logger::LogLine("\n========================================");
+    Logger::LogLine("=== 3D DEMO: Primitives + OBJ Model ===");
+    Logger::LogLine("========================================\n");
+
+    // Setup camera
+    camera3D.SetPosition(Vec3(8, 6, 10));
+    camera3D.SetTarget(Vec3(0, 1, 0));
+    camera3D.SetUp(Vec3(0, 1, 0));
+    Logger::LogLine("Camera initialized");
+
+    // Create primitive meshes
+    cubeMesh = Mesh3D::CreateCube(1.0f);
+    sphereMesh = Mesh3D::CreateSphere(1.0f, 16);
+    planeMesh = Mesh3D::CreatePlane(12.0f, 12.0f);
+    pyramidMesh = Mesh3D::CreatePyramid(1.0f, 1.5f);
+    Logger::LogLine("Primitive meshes created");
+
+    // Load OBJ model
+    Logger::LogLine("\n=== Loading OBJ Model ===");
+    if (objModel.LoadFromOBJ("../../../data/TestData/suzanne.obj")) {
+        Logger::LogLine("SUCCESS: Suzanne model loaded!\n");
+    }
+    else {
+        Logger::LogError("Failed to load suzanne.obj\n");
+    }
+
+    // Setup lighting
+    LightingSystem::Init();
+    Logger::LogLine("Lighting system initialized");
+
+    // Create particle system
+    particleSystem = new ParticleSystem3D(500);
+    particleSystem->startColor = Vec3(1.0f, 0.8f, 0.2f);
+    particleSystem->endColor = Vec3(1.0f, 0.2f, 0.1f);
+    particleSystem->gravity = Vec3(0, -5.0f, 0);
+    particleSystem->lifeTime = 2.0f;
+    particleSystem->emitVelocity = Vec3(0, 2.0f, 0);
+    particleSystem->emitVelocityVariance = Vec3(0.8f, 1.0f, 0.8f);
+    Logger::LogLine("Particle system created");
+
+    // Initialize UI
+    UIManager::Init();
+    UIManager::AddText("controls", 20, UIManager::GetScreenHeight() - 60,
+        "F = Wireframe | SPACE = Explosion",
+        0.6f, 0.6f, 0.6f, GLUT_BITMAP_HELVETICA_10);
+    UIManager::AddText("mode", UIManager::GetScreenWidth() - 120, 20,
+        "Mode: FILLED", 1.0f, 1.0f, 0.0f);
+
+    Logger::LogLine("\nControls:");
+    Logger::LogLine("  F - Toggle Wireframe");
+    Logger::LogLine("  SPACE - Spawn Explosion");
+    Logger::LogLine("\n========================================\n");
+}
+
+//-----------------------------------------------------------------------------
+// Update
+//-----------------------------------------------------------------------------
+void Update(float deltaTime) {
+    float dt = deltaTime / 1000.0f;
+    gameTime += dt;
+
+    // Toggle wireframe
+    static bool fKeyWas = false;
+    bool fKeyNow = App::IsKeyPressed(App::KEY_F);
+    if (fKeyNow && !fKeyWas) {
+        renderWireframe = !renderWireframe;
+        UIManager::UpdateText("mode", renderWireframe ? "Mode: WIREFRAME" : "Mode: FILLED");
+        Logger::LogFormat("Wireframe mode: %s\n", renderWireframe ? "ON" : "OFF");
+    }
+    fKeyWas = fKeyNow;
+
+    // Explosion on space
+    static bool spaceWas = false;
+    bool spaceNow = App::IsKeyPressed(App::KEY_SPACE);
+    if (spaceNow && !spaceWas) {
+        float angle = gameTime * 1.0f;
+        Vec3 explosionPos(cosf(angle) * 3.0f, 1.5f, sinf(angle) * 3.0f);
+        particleSystem->EmitExplosion(explosionPos, 100);
+        Logger::LogLine("BOOM! Particle explosion spawned");
+    }
+    spaceWas = spaceNow;
+
+    // Continuous particle emission
+    particleSpawnTimer += dt;
+    if (particleSpawnTimer > 0.1f) {
+        particleSystem->EmitContinuous(Vec3(0, 2, 0), 10.0f, particleSpawnTimer);
+        particleSpawnTimer = 0.0f;
+    }
+
+    // Update particles
+    particleSystem->Update(dt);
+}
+
+//-----------------------------------------------------------------------------
+// Render
+//-----------------------------------------------------------------------------
+void Render() {
+    // Ground plane
+    Renderer3D::DrawMesh(planeMesh, Vec3(0, 0, 0), Vec3(0, 0, 0), Vec3(1, 1, 1),
+        camera3D, 0.4f, 0.5f, 0.4f, renderWireframe);
+
+    // Rotating cube
+    Renderer3D::DrawMesh(cubeMesh, Vec3(-3, 1, 0),
+        Vec3(0, gameTime * 45.0f, 0), Vec3(1, 1, 1),
+        camera3D, 1.0f, 0.3f, 0.3f, renderWireframe);
+
+    // Pulsing sphere
+    float pulse = 1.0f + 0.3f * sinf(gameTime * 2.0f);
+    Renderer3D::DrawMesh(sphereMesh, Vec3(0, 1.5f, 0),
+        Vec3(gameTime * 30.0f, gameTime * 30.0f, 0),
+        Vec3(pulse, pulse, pulse),
+        camera3D, 0.3f, 0.5f, 1.0f, renderWireframe);
+
+    // Orbiting pyramid
+    float angle = gameTime * 1.0f;
+    Vec3 circlePos(cosf(angle) * 3.0f, 1.0f, sinf(angle) * 3.0f);
+    float scaleX = 1.0f + 0.5f * sinf(gameTime * 1.5f);
+    float scaleY = 1.0f + 0.3f * cosf(gameTime * 2.0f);
+    Renderer3D::DrawMesh(pyramidMesh,
+        circlePos,
+        Vec3(gameTime * 20.0f, 0, gameTime * 35.0f),
+        Vec3(scaleX, scaleY, 1.0f),
+        camera3D,
+        0.3f, 1.0f, 0.3f,
+        renderWireframe);
+
+    // Draw OBJ model (Suzanne) - centered and rotating
+    if (objModel.GetVertexCount() > 0) {
+        Renderer3D::DrawMesh(objModel,
+            Vec3(0, 5.0f, 0),                    // Position above center
+            Vec3(0, gameTime * 25.0f, 0),        // Slow rotation on Y axis
+            Vec3(1.5f, 1.5f, 1.5f),              // Normal positive scale (winding fixed in loader)
+            camera3D,
+            0.9f, 0.7f, 0.3f,                    // Gold/orange color
+            renderWireframe);
+    }
+
+    // Render particles
+    particleSystem->Render(camera3D);
+
+    // Render all UI
+    UIManager::Render();
+}
+
+//-----------------------------------------------------------------------------
+// Shutdown
+//-----------------------------------------------------------------------------
+void Shutdown() {
+    delete particleSystem;
+    UIManager::Shutdown();
+    Logger::LogLine("Shutdown complete");
+}

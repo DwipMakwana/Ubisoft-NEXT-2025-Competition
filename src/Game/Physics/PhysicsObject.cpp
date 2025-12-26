@@ -1,0 +1,147 @@
+//-----------------------------------------------------------------------------
+// PhysicsObject.cpp
+//-----------------------------------------------------------------------------
+
+#include "PhysicsObject.h"
+#include <cmath>
+
+PhysicsObject::PhysicsObject(const Vec3& pos, float r, ColliderType type)
+    : position(pos)
+    , rotation(0, 0, 0)
+    , scale(1, 1, 1)
+    , velocity(0, 0, 0)
+    , force(0, 0, 0)
+    , mass(1.0f)
+    , invMass(1.0f)
+    , angularVelocity(0, 0, 0)
+    , torque(0, 0, 0)
+    , inertia(1, 1, 1)
+    , invInertia(1, 1, 1)
+    , colliderType(type)
+    , radius(r)
+    , halfExtents(r, r, r)
+    , height(r * 2.0f)
+    , linearDamping(0.01f)
+    , angularDamping(0.05f)
+    , isStatic(false)
+    , useGravity(true)
+    , isSleeping(false)
+    , sleepTimer(0.0f)
+    , lifetime(0.0f)       
+    , maxLifetime(30.0f)
+{
+    if (type == ColliderType::BOX) {
+        SetBox(Vec3(r, r, r));
+    }
+    else {
+        SetSphere(r);
+    }
+}
+
+void PhysicsObject::SetMass(float m) {
+    if (m <= 0.0f || isStatic) {
+        mass = 0.0f;
+        invMass = 0.0f;
+    }
+    else {
+        mass = m;
+        invMass = 1.0f / m;
+    }
+    UpdateInertia();
+}
+
+void PhysicsObject::SetBox(const Vec3& size) {
+    halfExtents = size;
+    colliderType = ColliderType::BOX;
+    UpdateInertia();
+}
+
+void PhysicsObject::SetSphere(float r) {
+    radius = r;
+    colliderType = ColliderType::SPHERE;
+    UpdateInertia();
+}
+
+void PhysicsObject::UpdateInertia() {
+    if (invMass == 0.0f) {
+        inertia = Vec3(0, 0, 0);
+        invInertia = Vec3(0, 0, 0);
+        return;
+    }
+
+    // Calculate moment of inertia based on shape
+    if (colliderType == ColliderType::SPHERE) {
+        // Solid sphere: I = (2/5) * m * r^2
+        float I = 0.4f * mass * radius * radius;
+        inertia = Vec3(I, I, I);
+    }
+    else if (colliderType == ColliderType::BOX) {
+        // Box inertia tensor (diagonal)
+        float x2 = halfExtents.x * halfExtents.x;
+        float y2 = halfExtents.y * halfExtents.y;
+        float z2 = halfExtents.z * halfExtents.z;
+
+        inertia.x = (mass / 3.0f) * (y2 + z2);
+        inertia.y = (mass / 3.0f) * (x2 + z2);
+        inertia.z = (mass / 3.0f) * (x2 + y2);
+    }
+
+    // Calculate inverse inertia
+    invInertia.x = (inertia.x > 0.0f) ? 1.0f / inertia.x : 0.0f;
+    invInertia.y = (inertia.y > 0.0f) ? 1.0f / inertia.y : 0.0f;
+    invInertia.z = (inertia.z > 0.0f) ? 1.0f / inertia.z : 0.0f;
+}
+
+void PhysicsObject::AddForce(const Vec3& f) {
+    force = force + f;
+    WakeUp();
+}
+
+void PhysicsObject::AddForceAtPoint(const Vec3& f, const Vec3& point) {
+    // Add linear force
+    force = force + f;
+
+    // Calculate torque = r × F
+    Vec3 r = point - position;
+    Vec3 t = r.Cross(f);
+    torque = torque + t;
+
+    WakeUp();
+}
+
+void PhysicsObject::AddTorque(const Vec3& t) {
+    torque = torque + t;
+    WakeUp();
+}
+
+void PhysicsObject::ClearForces() {
+    force = Vec3(0, 0, 0);
+    torque = Vec3(0, 0, 0);
+}
+
+void PhysicsObject::UpdateSleep(float dt) {
+    if (isStatic) return;
+
+    float velSq = velocity.LengthSquared();
+    float angVelSq = angularVelocity.LengthSquared();
+
+    const float sleepThreshold = 0.01f;
+
+    if (velSq < sleepThreshold && angVelSq < sleepThreshold) {
+        sleepTimer += dt;
+        if (sleepTimer > 0.5f) {
+            isSleeping = true;
+            velocity = Vec3(0, 0, 0);
+            angularVelocity = Vec3(0, 0, 0);
+        }
+    }
+    else {
+        sleepTimer = 0.0f;
+        isSleeping = false;
+    }
+}
+
+void PhysicsObject::WakeUp() {
+    isSleeping = false;
+    sleepTimer = 0.0f;
+}
