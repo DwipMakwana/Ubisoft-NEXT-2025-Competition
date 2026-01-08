@@ -22,7 +22,11 @@ class PhysicsSystem {
 public:
     std::vector<PhysicsObject> bodies;
     Vec3 gravity;
-    Plane3D* groundPlane;  // Changed to pointer
+    Plane3D* groundPlane;
+    Mesh3D* suzanneMeshRef;
+
+    float planeSizeX;
+    float planeSizeZ;
 
     // Solver settings
     int velocityIterations;
@@ -36,6 +40,13 @@ public:
     PhysicsObject& SpawnBody(int type);
     void Update(float dt);
     void Render(Camera3D& camera, Mesh3D& sphereMesh, Mesh3D& cubeMesh, bool wireframe);
+
+    void SetSuzanneMesh(Mesh3D* mesh) { suzanneMeshRef = mesh; }
+
+    void SetPlaneDimensions(float sizeX, float sizeZ) {
+        planeSizeX = sizeX;
+        planeSizeZ = sizeZ;
+    }
 
 private:
     // Integration

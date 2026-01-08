@@ -1,48 +1,66 @@
 //-----------------------------------------------------------------------------
 // AudioManager.h
-// Audio management
+// Enhanced audio management with volume control and categories
 //-----------------------------------------------------------------------------
 #ifndef AUDIO_MANAGER_H
 #define AUDIO_MANAGER_H
 
 #include "App.h"
-#include <vector>
 #include <string>
-#include <algorithm>
+#include <vector>
+#include <unordered_map>
+
+enum class AudioCategory {
+    MUSIC,
+    SFX,
+    AMBIENT,
+    UI
+};
 
 class AudioManager {
 private:
     struct Sound {
         std::string filename;
         bool isLooping;
+        AudioCategory category;
+        float volume;
     };
-    std::vector<Sound> activeSounds;
+
+    std::unordered_map<std::string, Sound> activeSounds;
+    std::unordered_map<AudioCategory, float> categoryVolumes;
+    bool initialized;
 
 public:
-    void PlaySound(const char* filename, bool loop = false) {
-        App::PlayAudio(filename, loop);
-        activeSounds.push_back({ filename, loop });
-    }
+    AudioManager();
+    ~AudioManager();
 
-    void StopSound(const char* filename) {
-        App::StopAudio(filename);
-        activeSounds.erase(
-            std::remove_if(activeSounds.begin(), activeSounds.end(),
-                [filename](const Sound& s) { return s.filename == filename; }),
-            activeSounds.end()
-        );
-    }
+    // Initialization and cleanup
+    void Initialize();
+    void Shutdown();
 
-    void StopAllSounds() {
-        for (const auto& sound : activeSounds) {
-            App::StopAudio(sound.filename.c_str());
-        }
-        activeSounds.clear();
-    }
+    // Sound playback control
+    void PlaySound(const char* filename, bool loop = false,
+        AudioCategory category = AudioCategory::SFX);
+    void StopSound(const char* filename);
+    void StopAllSounds();
+    void StopCategory(AudioCategory category);
 
-    bool IsPlaying(const char* filename) const {
-        return App::IsSoundPlaying(filename);
-    }
+    // Query functions
+    bool IsPlaying(const char* filename) const;
+    bool IsInitialized() const { return initialized; }
+
+    // Volume control
+    void SetCategoryVolume(AudioCategory category, float volume);
+    float GetCategoryVolume(AudioCategory category) const;
+    void SetMasterVolume(float volume);
+
+    // Utility functions
+    int GetActiveSoundCount() const;
+    void PauseAll();
+    void ResumeAll();
+
+private:
+    void InitializeCategoryVolumes();
 };
 
 #endif // AUDIO_MANAGER_H

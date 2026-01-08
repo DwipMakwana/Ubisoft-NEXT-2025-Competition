@@ -7,12 +7,14 @@
 #define PHYSICS_OBJECT_H
 
 #include "../Utilities/MathUtils3D.h"
+#include "Collision3D.h"
+#include "../Rendering/Mesh3D.h"
 
 enum class ColliderType {
     SPHERE,
     BOX,
-    CAPSULE,
-    PLANE
+    PLANE,
+    CONVEX_HULL,
 };
 
 struct Material {
@@ -25,6 +27,13 @@ struct Material {
 
 class PhysicsObject {
 public:
+    ConvexHull3D* convexHull;
+    Mesh3D* renderMeshRef;
+
+    // Track if object is resting on ground
+    bool isGrounded;
+    float groundedTime;
+
     // Transform
     Vec3 position;
     Vec3 rotation;      // Euler angles in radians (for rendering)
@@ -60,6 +69,7 @@ public:
     bool useGravity;
     bool isSleeping;
     float sleepTimer;
+    float sleepThreshold;
 
 	// Lifetime
     float lifetime;
@@ -85,6 +95,8 @@ public:
     // Sleep system
     void UpdateSleep(float dt);
     void WakeUp();
+
+    void SetConvexHull(const Mesh3D& mesh);
 };
 
 #endif // PHYSICS_OBJECT_H

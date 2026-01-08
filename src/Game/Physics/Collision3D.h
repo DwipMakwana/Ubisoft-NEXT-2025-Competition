@@ -7,6 +7,7 @@
 #define COLLISION_3D_H
 
 #include "../Utilities/MathUtils3D.h"
+#include <vector>
 
 // Contact information for physics resolution
 struct Contact3D {
@@ -51,14 +52,14 @@ struct Sphere3D {
 };
 
 struct AABB3D {
-    Vec3 min;
-    Vec3 max;
+    Vec3 minPoint;
+    Vec3 maxPoint;
 
-    AABB3D() : min(-1, -1, -1), max(1, 1, 1) {}
-    AABB3D(const Vec3& minP, const Vec3& maxP) : min(minP), max(maxP) {}
+    AABB3D() : minPoint(-1, -1, -1), maxPoint(1, 1, 1) {}
+    AABB3D(const Vec3& minP, const Vec3& maxP) : minPoint(minP), maxPoint(maxP) {}
 
-    Vec3 GetCenter() const { return (min + max) * 0.5f; }
-    Vec3 GetExtents() const { return (max - min) * 0.5f; }
+    Vec3 GetCenter() const { return (minPoint + maxPoint) * 0.5f; }
+    Vec3 GetExtents() const { return (maxPoint - minPoint) * 0.5f; }
 };
 
 struct OBB3D {
@@ -84,11 +85,33 @@ struct Plane3D {
 };
 
 //-----------------------------------------------------------------------------
+// Convex shapes
+//-----------------------------------------------------------------------------
+
+struct ConvexHull3D {
+    Vec3 center;                      // Center of mass
+    std::vector<Vec3> vertices;       // Vertex positions (local space)
+    std::vector<Vec3> faces;          // Face normals (local space)
+    std::vector<int> faceIndices;     // Indices per face (e.g. [3,0,1,2, 4,3,4,5,6, ...])
+
+    // Transformed data (world space) - updated per frame
+    std::vector<Vec3> worldVertices;
+    std::vector<Vec3> worldNormals;
+
+    void UpdateTransform(const Vec3& position, const Vec3& rotation);
+    Vec3 GetSupport(const Vec3& direction) const;  // For GJK (future)
+};
+
+//-----------------------------------------------------------------------------
 // Collision detection class
 //-----------------------------------------------------------------------------
 
 class Collision3D {
 public:
+    // Convex hull collision
+    static bool ConvexHullConvexHull(const ConvexHull3D& a, const ConvexHull3D& b, ContactManifold& manifold);
+    static bool ConvexHullPlane(const ConvexHull3D& hull, const Plane3D& plane, ContactManifold& manifold);
+
     // Sphere collisions
     static bool TestSphereSphere(const Sphere3D& a, const Sphere3D& b);
     static bool SphereSphere(const Sphere3D& a, const Sphere3D& b, ContactManifold& manifold);
@@ -107,6 +130,12 @@ public:
     // Utility functions
     static Vec3 ClosestPointOnOBB(const Vec3& point, const OBB3D& box);
     static void GetOBBCorners(const OBB3D& box, Vec3 corners[8]);
+
+private:
+
+    static bool TestAxis(const ConvexHull3D& a, const ConvexHull3D& b, const Vec3& axis, float& penetration);
+    static void GetInterval(const ConvexHull3D& hull, const Vec3& axis, float& min, float& max);
+    static Vec3 GetContactPoint(const ConvexHull3D& a, const ConvexHull3D& b, const Vec3& normal);
 };
 
 #endif // COLLISION_3D_H

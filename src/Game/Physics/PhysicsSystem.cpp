@@ -13,6 +13,9 @@
 PhysicsSystem::PhysicsSystem()
     : gravity(0, -9.8f, 0)
     , groundPlane(nullptr)
+    , suzanneMeshRef(nullptr)
+    , planeSizeX(10.0f)
+    , planeSizeZ(10.0f)
     , velocityIterations(4)
     , positionIterations(3)
     , baumgarte(0.3f)
@@ -53,24 +56,54 @@ PhysicsObject& PhysicsSystem::SpawnBody(int type) {
     obj.lifetime = 0.0f;
     obj.maxLifetime = 5.0f;
 
-    if (type == 0) {
-        // Sphere
+    switch (type) {
+    case 0: // Sphere
+        obj.colliderType = ColliderType::SPHERE;
+        obj.SetSphere(0.5f);
+        obj.SetMass(1.0f);
+        obj.material.restitution = 0.3f;
+        obj.material.staticFriction = 0.9f;
+        obj.material.dynamicFriction = 0.4f;
+        break;
+
+    case 1: // Box
+        obj.colliderType = ColliderType::BOX;
+        obj.SetBox(Vec3(0.5f, 0.5f, 0.5f));
+        obj.SetMass(1.0f);
+        obj.material.restitution = 0.05f;
+        obj.material.staticFriction = 1.0f;
+        obj.material.dynamicFriction = 0.8f;
+        break;
+
+    case 2: // Suzanne (Convex Hull)
+        if (suzanneMeshRef != nullptr) {
+            obj.SetConvexHull(*suzanneMeshRef);
+            obj.SetMass(1.0f);
+            obj.material.restitution = 0.1f;
+            obj.material.staticFriction = 0.95f;
+            obj.material.dynamicFriction = 0.65f;
+            obj.renderMeshRef = suzanneMeshRef;  // Store reference for rendering
+        }
+        else {
+            // Fallback to sphere if Suzanne not loaded
+            obj.colliderType = ColliderType::SPHERE;
+            obj.SetSphere(0.5f);
+            obj.SetMass(1.0f);
+            obj.material.restitution = 0.1f;
+            obj.material.staticFriction = 0.95f;
+            obj.material.dynamicFriction = 0.65f;
+        }
+        break;
+
+    default:
+        // Default to sphere
         obj.colliderType = ColliderType::SPHERE;
         obj.SetSphere(0.5f);
         obj.SetMass(1.0f);
         obj.material.restitution = 0.3f;
         obj.material.staticFriction = 0.6f;
         obj.material.dynamicFriction = 0.4f;
-    }
-    else {
-        // Box
-        obj.colliderType = ColliderType::BOX;
-        Vec3 size(0.5f, 0.5f, 0.5f);
-        obj.SetBox(size);
-        obj.SetMass(1.0f);
-        obj.material.restitution = 0.2f;
-        obj.material.staticFriction = 0.7f;
-        obj.material.dynamicFriction = 0.5f;
+        break;
     }
 
     bodies.push_back(obj);
@@ -84,17 +117,28 @@ PhysicsObject& PhysicsSystem::SpawnBody(int type) {
 void PhysicsSystem::IntegrateForces(PhysicsObject& obj, float dt) {
     if (obj.isStatic || obj.isSleeping) return;
 
-    // Apply gravity
+    // Apply gravity (less when grounded and moving slowly)
     if (obj.useGravity) {
-        obj.AddForce(gravity * obj.mass);
+        float gravityScale = 1.0f;
+
+        // Reduce gravity slightly when resting on ground
+        if (obj.isGrounded && obj.velocity.y > -0.5f && obj.velocity.y < 0.5f) {
+            gravityScale = 0.95f;
+        }
+
+        obj.AddForce(gravity * obj.mass * gravityScale);
     }
 
     // Integrate linear velocity
     Vec3 acceleration = obj.force * obj.invMass;
     obj.velocity = obj.velocity + acceleration * dt;
 
-    // Apply linear damping
-    obj.velocity = obj.velocity * (1.0f - obj.linearDamping);
+    // Apply linear damping (more when grounded)
+    float damping = obj.linearDamping;
+    if (obj.isGrounded) {
+        damping *= 2.0f;  // Double damping on ground
+    }
+    obj.velocity = obj.velocity * (1.0f - damping);
 
     // Integrate angular velocity
     Vec3 angularAccel(
@@ -104,8 +148,12 @@ void PhysicsSystem::IntegrateForces(PhysicsObject& obj, float dt) {
     );
     obj.angularVelocity = obj.angularVelocity + angularAccel * dt;
 
-    // Apply angular damping
-    obj.angularVelocity = obj.angularVelocity * (1.0f - obj.angularDamping);
+    // Apply angular damping (more when grounded)
+    float angularDamp = obj.angularDamping;
+    if (obj.isGrounded) {
+        angularDamp *= 2.0f;  // Double angular damping on ground
+    }
+    obj.angularVelocity = obj.angularVelocity * (1.0f - angularDamp);
 
     // Clear forces
     obj.ClearForces();
@@ -114,10 +162,22 @@ void PhysicsSystem::IntegrateForces(PhysicsObject& obj, float dt) {
 void PhysicsSystem::IntegrateVelocity(PhysicsObject& obj, float dt) {
     if (obj.isStatic || obj.isSleeping) return;
 
+    // Kill tiny velocities to prevent drift
+    if (obj.isGrounded) {
+        // Kill minuscule horizontal velocities
+        if (fabsf(obj.velocity.x) < 0.01f) obj.velocity.x = 0.0f;
+        if (fabsf(obj.velocity.z) < 0.01f) obj.velocity.z = 0.0f;
+
+        // Kill tiny angular velocities
+        if (fabsf(obj.angularVelocity.x) < 0.05f) obj.angularVelocity.x = 0.0f;
+        if (fabsf(obj.angularVelocity.y) < 0.05f) obj.angularVelocity.y = 0.0f;
+        if (fabsf(obj.angularVelocity.z) < 0.05f) obj.angularVelocity.z = 0.0f;
+    }
+
     // Update position
     obj.position = obj.position + obj.velocity * dt;
 
-    // Update rotation (Euler integration - good enough for this)
+    // Update rotation
     obj.rotation = obj.rotation + obj.angularVelocity * dt;
 
     // Keep rotation in range [0, 2π]
@@ -143,6 +203,19 @@ void PhysicsSystem::GetOBB(const PhysicsObject& obj, OBB3D& obb) {
 }
 
 bool PhysicsSystem::DetectCollision(PhysicsObject& a, PhysicsObject& b, ContactManifold& manifold) {
+    // Update transforms for convex hulls
+    if (a.colliderType == ColliderType::CONVEX_HULL) {
+        a.convexHull->UpdateTransform(a.position, a.rotation);
+    }
+    if (b.colliderType == ColliderType::CONVEX_HULL) {
+        b.convexHull->UpdateTransform(b.position, b.rotation);
+    }
+
+    // Convex hull vs convex hull
+    if (a.colliderType == ColliderType::CONVEX_HULL && b.colliderType == ColliderType::CONVEX_HULL) {
+        return Collision3D::ConvexHullConvexHull(*a.convexHull, *b.convexHull, manifold);
+    }
+    
     // Broad phase
     float maxRadius = (a.colliderType == ColliderType::SPHERE) ? a.radius : a.halfExtents.Length();
     maxRadius += (b.colliderType == ColliderType::SPHERE) ? b.radius : b.halfExtents.Length();
@@ -206,7 +279,16 @@ bool PhysicsSystem::DetectCollision(PhysicsObject& a, PhysicsObject& b, ContactM
 }
 
 bool PhysicsSystem::DetectGroundCollision(PhysicsObject& obj, ContactManifold& manifold) {
-    if (obj.colliderType == ColliderType::SPHERE) {
+    if (fabsf(obj.position.x) > planeSizeX ||
+        fabsf(obj.position.z) > planeSizeZ) {
+        return false;  // Object is outside plane bounds
+    }
+
+    if (obj.colliderType == ColliderType::CONVEX_HULL) {
+        obj.convexHull->UpdateTransform(obj.position, obj.rotation);
+        return Collision3D::ConvexHullPlane(*obj.convexHull, *groundPlane, manifold);
+    }
+    else if (obj.colliderType == ColliderType::SPHERE) {
         Sphere3D sphere;
         GetSphere(obj, sphere);
 
@@ -361,10 +443,50 @@ void PhysicsSystem::ResolveGroundContact(PhysicsObject& obj, const Contact3D& co
     Vec3 v = obj.velocity + obj.angularVelocity.Cross(r);
     float velAlongNormal = v.Dot(contact.normal);
 
-    // Don't resolve if separating
-    if (velAlongNormal > 0.1f || contact.penetration < 0.001f) return;
+    // Mark as grounded
+    obj.isGrounded = true;
+    obj.groundedTime += 0.016f;
 
-    float e = obj.material.restitution * 0.3f; // Ground dampens more
+    // Don't resolve if separating
+    if (velAlongNormal > 0.1f) return;
+
+    // CRITICAL: If nearly at rest, force objects to lie flat
+    if (fabsf(velAlongNormal) < 0.05f && obj.velocity.Length() < 0.1f) {
+        // Kill all velocities
+        obj.velocity.y = 0.0f;
+
+        // Kill horizontal motion if very small
+        if (fabsf(obj.velocity.x) < 0.02f) obj.velocity.x = 0.0f;
+        if (fabsf(obj.velocity.z) < 0.02f) obj.velocity.z = 0.0f;
+
+        // FORCE FLAT ROTATION for boxes
+        if (obj.colliderType == ColliderType::BOX) {
+            // Align to nearest 90-degree rotation
+            obj.rotation.x = roundf(obj.rotation.x / 1.5708f) * 1.5708f; // Round to nearest π/2
+            obj.rotation.z = roundf(obj.rotation.z / 1.5708f) * 1.5708f;
+
+            // Kill angular velocity completely when resting
+            if (obj.angularVelocity.Length() < 0.3f) {
+                obj.angularVelocity = Vec3(0, 0, 0);
+            }
+        }
+        else {
+            // For spheres and other shapes, just dampen rotation heavily
+            if (obj.angularVelocity.Length() < 0.2f) {
+                obj.angularVelocity = Vec3(0, 0, 0);
+            }
+        }
+
+        // Position correction only
+        if (contact.penetration > 0.005f) {
+            obj.position.y += contact.penetration * 0.8f;
+        }
+
+        return;
+    }
+
+    // Normal impulse resolution
+    float e = obj.material.restitution * 0.2f;  // Very damped bounce
 
     Vec3 rCrossN = r.Cross(contact.normal);
     float angularEffect = rCrossN.x * rCrossN.x * obj.invInertia.x +
@@ -384,6 +506,7 @@ void PhysicsSystem::ResolveGroundContact(PhysicsObject& obj, const Contact3D& co
     // Friction
     Vec3 tangent = v - contact.normal * velAlongNormal;
     float tangentLen = tangent.Length();
+
     if (tangentLen > 0.001f) {
         tangent = tangent / tangentLen;
         Vec3 rCrossT = r.Cross(tangent);
@@ -391,14 +514,22 @@ void PhysicsSystem::ResolveGroundContact(PhysicsObject& obj, const Contact3D& co
             rCrossT.y * rCrossT.y * obj.invInertia.y +
             rCrossT.z * rCrossT.z * obj.invInertia.z;
 
+        // Very high friction when nearly stopped
+        float friction = tangentLen < 0.5f ?
+            obj.material.staticFriction * 2.0f :
+            obj.material.dynamicFriction * 1.5f;
+
         float jt = -tangentLen / (obj.invMass + angularEffectT);
-        float maxFriction = obj.material.dynamicFriction * fabsf(j);
+        float maxFriction = friction * fabsf(j);
+
+        // Clamp friction
         if (jt > maxFriction) jt = maxFriction;
         if (jt < -maxFriction) jt = -maxFriction;
 
         Vec3 frictionImpulse = tangent * jt;
         obj.velocity = obj.velocity + frictionImpulse * obj.invMass;
 
+        // Apply friction torque
         Vec3 torqueF = r.Cross(frictionImpulse);
         obj.angularVelocity.x += torqueF.x * obj.invInertia.x;
         obj.angularVelocity.y += torqueF.y * obj.invInertia.y;
@@ -406,9 +537,10 @@ void PhysicsSystem::ResolveGroundContact(PhysicsObject& obj, const Contact3D& co
     }
 
     // Position correction
-    const float percent = 0.5f;
-    const float slop = 0.01f;
+    const float percent = 0.8f;
+    const float slop = 0.003f;
     float correctionAmount = contact.penetration - slop;
+
     if (correctionAmount > 0.0f) {
         obj.position = obj.position + contact.normal * (correctionAmount * percent);
     }
@@ -422,19 +554,24 @@ void PhysicsSystem::Update(float dt) {
     // Cap timestep
     if (dt > 0.033f) dt = 0.033f;
 
-    // Step 1: Apply forces -> velocities
+    // Step 1: Reset grounded state
+    for (auto& body : bodies) {
+        body.isGrounded = false;
+        body.groundedTime = 0.0f;
+    }
+
+    // Step 2: Apply forces -> velocities
     for (auto& body : bodies) {
         IntegrateForces(body, dt);
         body.lifetime += dt;
     }
 
-    // Step 2: Apply velocities -> positions  
+    // Step 3: Apply velocities -> positions  
     for (auto& body : bodies) {
         IntegrateVelocity(body, dt);
     }
 
-    // Step 3: Collision detection and response
-    // Ground collisions
+    // Step 4: Ground collisions (FIRST - to set grounded state)
     for (auto& body : bodies) {
         ContactManifold manifold;
         if (DetectGroundCollision(body, manifold)) {
@@ -444,11 +581,15 @@ void PhysicsSystem::Update(float dt) {
         }
     }
 
-    // Object-object collisions
+    // Step 5: Object-object collisions
     for (size_t i = 0; i < bodies.size(); i++) {
         for (size_t j = i + 1; j < bodies.size(); j++) {
             ContactManifold manifold;
             if (DetectCollision(bodies[i], bodies[j], manifold)) {
+                // Wake up both objects
+                bodies[i].WakeUp();
+                bodies[j].WakeUp();
+
                 for (int k = 0; k < manifold.numContacts; k++) {
                     ResolveContact(bodies[i], bodies[j], manifold.contacts[k]);
                 }
@@ -456,19 +597,15 @@ void PhysicsSystem::Update(float dt) {
         }
     }
 
-    // Step 4: Update sleep
+    // Step 6: Update sleep state
     for (auto& body : bodies) {
         body.UpdateSleep(dt);
     }
 
+    // Step 7: Cleanup
     bodies.erase(
         std::remove_if(bodies.begin(), bodies.end(),
             [](const PhysicsObject& obj) {
-                // Remove if too old
-                /*if (obj.lifetime > obj.maxLifetime) {
-                    return true;
-                }*/
-                // Remove if fallen too far below ground
                 if (obj.position.y < -10.0f) {
                     return true;
                 }
@@ -509,6 +646,18 @@ void PhysicsSystem::Render(Camera3D& camera, Mesh3D& sphereMesh, Mesh3D& cubeMes
                 size,
                 camera,
                 1.0f, 0.4f, 0.3f,
+                wireframe
+            );
+        }
+        else if (body.colliderType == ColliderType::CONVEX_HULL && body.renderMeshRef != nullptr) {
+            // Render Suzanne with custom mesh
+            Renderer3D::DrawMesh(
+                *body.renderMeshRef,
+                body.position,
+                rotDegrees,
+                Vec3(1.0f, 1.0f, 1.0f),  // Normal scale
+                camera,
+                0.8f, 0.6f, 0.2f,  // Gold/Orange color
                 wireframe
             );
         }

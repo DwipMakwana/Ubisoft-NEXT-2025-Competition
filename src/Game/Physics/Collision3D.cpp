@@ -5,6 +5,7 @@
 #include "Collision3D.h"
 #include <cmath>
 #include <algorithm>
+#include <cfloat>
 
 void OBB3D::SetRotation(const Vec3& eulerAngles) {
     // Build rotation matrix from Euler angles (XYZ order)
@@ -335,20 +336,210 @@ bool Collision3D::OBBPlane(const OBB3D& box, const Plane3D& plane, ContactManifo
     Vec3 corners[8];
     GetOBBCorners(box, corners);
 
+    // Find the lowest corner distance
+    float minDist = FLT_MAX;
+    for (int i = 0; i < 8; i++) {
+        float dist = corners[i].Dot(plane.normal) - plane.distance;
+        if (dist < minDist) {
+            minDist = dist;
+        }
+    }
+
+    // Only consider corners close to the ground
+    float threshold = minDist + 0.05f;  // 5cm tolerance
     int belowCount = 0;
+
     for (int i = 0; i < 8; i++) {
         float dist = corners[i].Dot(plane.normal) - plane.distance;
 
-        if (planeHalfSizeX > 0.0f && planeHalfSizeZ > 0.0f) {
-            if (fabsf(corners[i].x) > planeHalfSizeX ||
-                fabsf(corners[i].z) > planeHalfSizeZ) {
-                continue;
+        if (dist < threshold && dist < 0.1f) {  // Within threshold and below/near plane
+            belowCount++;
+            Vec3 contactPoint = corners[i] - plane.normal * dist;
+            manifold.AddContact(contactPoint, plane.normal, fmaxf(-dist, 0.0f));
+        }
+    }
+
+    return belowCount > 0;
+}
+
+void ConvexHull3D::UpdateTransform(const Vec3& position, const Vec3& rotation) {
+    // Build rotation matrix
+    float cx = cosf(rotation.x), sx = sinf(rotation.x);
+    float cy = cosf(rotation.y), sy = sinf(rotation.y);
+    float cz = cosf(rotation.z), sz = sinf(rotation.z);
+
+    // Rotation matrix columns (axes)
+    Vec3 right(cy * cz, sx * sy * cz + cx * sz, -cx * sy * cz + sx * sz);
+    Vec3 up(-cy * sz, -sx * sy * sz + cx * cz, cx * sy * sz + sx * cz);
+    Vec3 forward(sy, -sx * cy, cx * cy);
+
+    // Transform vertices to world space
+    worldVertices.resize(vertices.size());
+    for (size_t i = 0; i < vertices.size(); i++) {
+        Vec3 v = vertices[i];
+        worldVertices[i] = position + right * v.x + up * v.y + forward * v.z;
+    }
+
+    // Transform normals to world space (no translation)
+    worldNormals.resize(faces.size());
+    for (size_t i = 0; i < faces.size(); i++) {
+        Vec3 n = faces[i];
+        worldNormals[i] = (right * n.x + up * n.y + forward * n.z).Normalized();
+    }
+}
+
+Vec3 ConvexHull3D::GetSupport(const Vec3& direction) const {
+    float maxDot = -FLT_MAX;
+    Vec3 supportPoint = worldVertices[0];
+
+    for (const Vec3& v : worldVertices) {
+        float dot = v.Dot(direction);
+        if (dot > maxDot) {
+            maxDot = dot;
+            supportPoint = v;
+        }
+    }
+
+    return supportPoint;
+}
+
+//-----------------------------------------------------------------------------
+// SAT Implementation for Convex Hulls
+//-----------------------------------------------------------------------------
+
+void Collision3D::GetInterval(const ConvexHull3D& hull, const Vec3& axis, float& min, float& max) {
+    min = FLT_MAX;
+    max = -FLT_MAX;
+
+    for (const Vec3& v : hull.worldVertices) {
+        float projection = v.Dot(axis);
+        if (projection < min) min = projection;
+        if (projection > max) max = projection;
+    }
+}
+
+bool Collision3D::TestAxis(const ConvexHull3D& a, const ConvexHull3D& b, const Vec3& axis, float& penetration) {
+    // Skip near-zero axes (parallel edges)
+    if (axis.LengthSquared() < 0.0001f) {
+        return true;
+    }
+
+    Vec3 normalizedAxis = axis.Normalized();
+
+    float minA, maxA, minB, maxB;
+    GetInterval(a, normalizedAxis, minA, maxA);
+    GetInterval(b, normalizedAxis, minB, maxB);
+
+    // Check for separation
+    if (maxA < minB || maxB < minA) {
+        return false;  // Separating axis found
+    }
+
+    // Calculate penetration depth
+    float overlap = fminf(maxA - minB, maxB - minA);
+
+    // Track minimum penetration
+    if (overlap < penetration) {
+        penetration = overlap;
+    }
+
+    return true;  // No separation on this axis
+}
+
+bool Collision3D::ConvexHullConvexHull(const ConvexHull3D& a, const ConvexHull3D& b, ContactManifold& manifold) {
+    manifold.Clear();
+
+    float minPenetration = FLT_MAX;
+    Vec3 minAxis;
+
+    // Test face normals of A
+    for (const Vec3& normal : a.worldNormals) {
+        float penetration = FLT_MAX;
+        if (!TestAxis(a, b, normal, penetration)) {
+            return false;  // Separating axis found
+        }
+        if (penetration < minPenetration) {
+            minPenetration = penetration;
+            minAxis = normal;
+        }
+    }
+
+    // Test face normals of B
+    for (const Vec3& normal : b.worldNormals) {
+        float penetration = FLT_MAX;
+        if (!TestAxis(a, b, normal, penetration)) {
+            return false;  // Separating axis found
+        }
+        if (penetration < minPenetration) {
+            minPenetration = penetration;
+            minAxis = normal;
+        }
+    }
+
+    // Test edge-edge cross products (expensive but necessary)
+    // For performance, you can skip this and rely on face normals only
+    // Uncomment if you need perfect accuracy:
+    /*
+    for (size_t i = 0; i < a.worldVertices.size(); i++) {
+        Vec3 edgeA = a.worldVertices[(i + 1) % a.worldVertices.size()] - a.worldVertices[i];
+        for (size_t j = 0; j < b.worldVertices.size(); j++) {
+            Vec3 edgeB = b.worldVertices[(j + 1) % b.worldVertices.size()] - b.worldVertices[j];
+            Vec3 axis = edgeA.Cross(edgeB);
+
+            float penetration = FLT_MAX;
+            if (!TestAxis(a, b, axis, penetration)) {
+                return false;
+            }
+            if (penetration < minPenetration) {
+                minPenetration = penetration;
+                minAxis = axis.Normalized();
             }
         }
+    }
+    */
+
+    // Make sure normal points from A to B
+    Vec3 centerDelta = b.worldVertices[0] - a.worldVertices[0];
+    if (minAxis.Dot(centerDelta) < 0) {
+        minAxis = minAxis * -1.0f;
+    }
+
+    // Get contact point (simplified - use closest vertex on B to A)
+    Vec3 contactPoint = GetContactPoint(a, b, minAxis);
+
+    manifold.AddContact(contactPoint, minAxis, minPenetration);
+    return true;
+}
+
+Vec3 Collision3D::GetContactPoint(const ConvexHull3D& a, const ConvexHull3D& b, const Vec3& normal) {
+    // Find the vertex on B closest to A along the collision normal
+    float minDist = FLT_MAX;
+    Vec3 contactPoint = b.worldVertices[0];
+
+    // Get a reference point on A
+    Vec3 refPoint = a.worldVertices[0];
+
+    for (const Vec3& v : b.worldVertices) {
+        float dist = (v - refPoint).Dot(normal);
+        if (dist < minDist) {
+            minDist = dist;
+            contactPoint = v;
+        }
+    }
+
+    return contactPoint;
+}
+
+bool Collision3D::ConvexHullPlane(const ConvexHull3D& hull, const Plane3D& plane, ContactManifold& manifold) {
+    manifold.Clear();
+
+    int belowCount = 0;
+    for (const Vec3& vertex : hull.worldVertices) {
+        float dist = vertex.Dot(plane.normal) - plane.distance;
 
         if (dist < 0.0f) {
             belowCount++;
-            Vec3 contactPoint = corners[i] - plane.normal * dist;
+            Vec3 contactPoint = vertex - plane.normal * dist;
             manifold.AddContact(contactPoint, plane.normal, -dist);
         }
     }

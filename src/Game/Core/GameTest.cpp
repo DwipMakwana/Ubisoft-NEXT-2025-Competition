@@ -9,11 +9,14 @@
 #include "ctime"
 #include "algorithm"
 #include <Utilities/Logger.h>
+#include <Managers/AudioManager.h>
 
 Camera3D camera3D;
 Mesh3D planeMesh, sphereMesh, cubeMesh, suzzaneMesh;
 PhysicsSystem physicsSystem;
+AudioManager audioManager;
 LightingSystem* lighting = nullptr;
+
 bool renderWireframe = false;
 bool showColliders = false;
 
@@ -26,15 +29,32 @@ void Init() {
     camera3D.SetUp(Vec3(0, 1, 0));
 
     // Create meshes
-    planeMesh = Mesh3D::CreatePlane(20.0f, 20.0f);
+    float planeWidth = 20.0f;
+    float planeDepth = 20.0f;
+    planeMesh = Mesh3D::CreatePlane(planeWidth, planeDepth);
     sphereMesh = Mesh3D::CreateSphere(1.0f, 16);
     cubeMesh = Mesh3D::CreateCube(1.0f);
+    bool suzanneLoaded = suzzaneMesh.LoadFromOBJ("../../../data/TestData/Suzanne.obj");
+
+    if (suzanneLoaded) {
+        printf("✓ Suzanne loaded successfully!\n");
+        physicsSystem.SetSuzanneMesh(&suzzaneMesh);
+    }
+    else {
+        printf("✗ Warning: Could not load Suzanne from Assets/suzanne.obj\n");
+        printf("  Spawning type 2 will fallback to sphere.\n");
+        physicsSystem.SetSuzanneMesh(nullptr);
+    }
 
     // Setup lighting
     LightingSystem::Init();
     LightingSystem::ambientColor = Vec3(0.3f, 0.3f, 0.4f);
     LightingSystem::lightColor = Vec3(1.0f, 0.95f, 0.8f);
     LightingSystem::lightIntensity = 0.8f;
+
+    // Setup Audio
+    audioManager.Initialize();
+    audioManager.SetCategoryVolume(AudioCategory::SFX, 0.8f);
 
     // UI
     UIManager::Init();
@@ -77,9 +97,11 @@ void Update(float deltaTime) {
     static bool spaceWas = false;
     bool spaceNow = App::IsKeyPressed(App::KEY_SPACE);
     if (spaceNow && !spaceWas) {
-        int type = rand() % 2;
+        int type = rand() % 3;
         physicsSystem.SpawnBody(type);
         printf("Spawned %s\n", type == 0 ? "sphere" : "cube");
+
+        audioManager.PlaySound("../../../data/TestData/Test.wav", false, AudioCategory::SFX);
     }
     spaceWas = spaceNow;
 
@@ -145,6 +167,31 @@ void Render() {
                     true  // Force wireframe
                 );
             }
+            else if (body.colliderType == ColliderType::CONVEX_HULL) {
+                if (body.renderMeshRef != nullptr) {
+                    Renderer3D::DrawMesh(
+                        *body.renderMeshRef,
+                        body.position,
+                        rotDegrees,
+                        Vec3(1.0f, 1.0f, 1.0f),  // Normal scale
+                        camera3D,
+                        0.0f, 1.0f, 0.0f,  // Green wireframe
+                        true  // Force wireframe
+                    );
+                }
+                else {
+                    // Fallback: draw bounding sphere if mesh not available
+                    Renderer3D::DrawMesh(
+                        sphereMesh,
+                        body.position,
+                        Vec3(0, 0, 0),
+                        Vec3(body.radius, body.radius, body.radius),
+                        camera3D,
+                        0.0f, 1.0f, 0.0f,
+                        true
+                    );
+                }
+            }
         }
     }
 
@@ -153,4 +200,5 @@ void Render() {
 
 void Shutdown() {
     UIManager::Shutdown();
+    audioManager.Shutdown();
 }

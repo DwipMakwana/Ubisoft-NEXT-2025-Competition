@@ -29,6 +29,11 @@ PhysicsObject::PhysicsObject(const Vec3& pos, float r, ColliderType type)
     , sleepTimer(0.0f)
     , lifetime(0.0f)       
     , maxLifetime(30.0f)
+    , convexHull(nullptr)
+    , renderMeshRef(nullptr)
+    , sleepThreshold(0.5f)
+    , isGrounded(false)
+    , groundedTime(0.0f)
 {
     if (type == ColliderType::BOX) {
         SetBox(Vec3(r, r, r));
@@ -120,19 +125,22 @@ void PhysicsObject::ClearForces() {
 }
 
 void PhysicsObject::UpdateSleep(float dt) {
-    if (isStatic) return;
+    float speed = velocity.Length();
+    float angularSpeed = angularVelocity.Length();
 
-    float velSq = velocity.LengthSquared();
-    float angVelSq = angularVelocity.LengthSquared();
-
-    const float sleepThreshold = 0.01f;
-
-    if (velSq < sleepThreshold && angVelSq < sleepThreshold) {
+    // More strict sleep conditions
+    if (speed < 0.02f && angularSpeed < 0.05f && isGrounded) {
         sleepTimer += dt;
-        if (sleepTimer > 0.5f) {
+        if (sleepTimer > 0.2f) {  // Sleep after only 0.2 seconds
             isSleeping = true;
             velocity = Vec3(0, 0, 0);
             angularVelocity = Vec3(0, 0, 0);
+
+            // Snap boxes to flat orientation
+            if (colliderType == ColliderType::BOX) {
+                rotation.x = roundf(rotation.x / 1.5708f) * 1.5708f;
+                rotation.z = roundf(rotation.z / 1.5708f) * 1.5708f;
+            }
         }
     }
     else {
@@ -144,4 +152,73 @@ void PhysicsObject::UpdateSleep(float dt) {
 void PhysicsObject::WakeUp() {
     isSleeping = false;
     sleepTimer = 0.0f;
+}
+
+void PhysicsObject::SetConvexHull(const Mesh3D& mesh) {
+    if (convexHull) delete convexHull;
+
+    convexHull = new ConvexHull3D();
+    colliderType = ColliderType::CONVEX_HULL;
+
+    // Extract vertex positions
+    convexHull->vertices.clear();
+    for (size_t i = 0; i < mesh.vertices.size(); i++) {
+        convexHull->vertices.push_back(mesh.vertices[i].position);
+    }
+
+    // Calculate center of mass
+    Vec3 center(0, 0, 0);
+    for (const Vec3& v : convexHull->vertices) {
+        center = center + v;
+    }
+    center = center * (1.0f / (float)convexHull->vertices.size());
+    convexHull->center = center;
+
+    // Generate face normals using a simple approach
+    // We'll use the vertex normals if available, or generate basic faces
+    std::vector<Vec3> faceNormals;
+
+    // Try to extract normals from vertex data
+    for (size_t i = 0; i < mesh.vertices.size(); i++) {
+        Vec3 normal = mesh.vertices[i].normal;  // Assuming vertices have normals
+
+        // Check if unique
+        bool found = false;
+        for (const Vec3& existing : faceNormals) {
+            if (fabsf(normal.Dot(existing)) > 0.98f) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found && normal.Length() > 0.01f) {
+            faceNormals.push_back(normal.Normalized());
+        }
+
+        // Limit number of faces for performance
+        if (faceNormals.size() >= 20) break;
+    }
+
+    // Fallback: use 6 axis-aligned directions
+    if (faceNormals.empty()) {
+        faceNormals.push_back(Vec3(1, 0, 0));
+        faceNormals.push_back(Vec3(-1, 0, 0));
+        faceNormals.push_back(Vec3(0, 1, 0));
+        faceNormals.push_back(Vec3(0, -1, 0));
+        faceNormals.push_back(Vec3(0, 0, 1));
+        faceNormals.push_back(Vec3(0, 0, -1));
+    }
+
+    convexHull->faces = faceNormals;
+
+    // Calculate bounding radius
+    float maxRadius = 0.0f;
+    for (const Vec3& v : convexHull->vertices) {
+        float r = (v - center).Length();
+        if (r > maxRadius) maxRadius = r;
+    }
+
+    this->radius = maxRadius;
+    this->halfExtents = Vec3(maxRadius, maxRadius, maxRadius);
+    SetMass(mass);
 }
