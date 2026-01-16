@@ -17,6 +17,8 @@ PhysicsSystem physicsSystem;
 AudioManager audioManager;
 LightingSystem* lighting = nullptr;
 
+CSimpleSprite* testSprite = nullptr;
+
 bool renderWireframe = false;
 bool showColliders = false;
 
@@ -58,10 +60,20 @@ void Init() {
 
     // UI
     UIManager::Init();
+
+    UIManager::LoadSprite("character", "../../../data/TestData/Test.bmp", 8, 4);  // 8x4 sprite
+    // Add sprite instances
+    UIManager::AddSprite("player", "character", 100, 100, 64, 64);
+    UIManager::SetSpriteLayer("player", 2);      // Top
+
+    // Setup walking animation for character (frames 8-15)
+    UIManager::PlaySpriteAnimation("player", 0, 31, 0.1f);
+
     UIManager::AddText("controls", 20, 70,
         "WASD/E/Q: Move Camera | SPACE: Spawn Shape | F: Wireframe | C: Show Colliders",
         1.0f, 1.0f, 1.0f, GLUT_BITMAP_HELVETICA_12);
-    UIManager::AddText("bodycount", 20, 20, "Bodies: 0", 1.0f, 1.0f, 0.0f, GLUT_BITMAP_HELVETICA_12);
+    UIManager::AddText("bodycount", 20, 20, "Bodies: 0", 1.0f, 1.0f, 0.0f, 
+        GLUT_BITMAP_HELVETICA_12);
 }
 
 void Update(float deltaTime) {
@@ -109,9 +121,7 @@ void Update(float deltaTime) {
     physicsSystem.Update(dt);
 
     // Update UI
-    char bodyText[64];
-    snprintf(bodyText, sizeof(bodyText), "Bodies: %zu", physicsSystem.bodies.size());
-    UIManager::UpdateText("bodycount", bodyText);
+    UIManager::Update(dt);
 }
 
 void Render() {

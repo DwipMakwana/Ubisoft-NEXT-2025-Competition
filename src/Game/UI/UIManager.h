@@ -1,44 +1,44 @@
 //-----------------------------------------------------------------------------
 // UIManager.h
-// Centralized UI rendering and management
+// Unified UI system for text and sprites
 //-----------------------------------------------------------------------------
+
 #ifndef UIMANAGER_H
 #define UIMANAGER_H
 
 #include <string>
-#include <vector>
+#include <map>
+#include "../ContestAPI/SimpleSprite.h"
 
+// Text element structure
 struct UIText {
-    float x, y;
     std::string text;
+    float x, y;
     float r, g, b;
     void* font;
-    bool enabled;
-
-    UIText(float px, float py, const std::string& txt,
-        float red = 1.0f, float green = 1.0f, float blue = 1.0f,
-        void* fnt = nullptr)
-        : x(px), y(py), text(txt), r(red), g(green), b(blue),
-        font(fnt), enabled(true) {
-    }
 };
 
-struct UIBar {
+// Sprite element structure
+struct UISprite {
+    CSimpleSprite* sprite;
     float x, y;
     float width, height;
-    float value;        // 0.0 to 1.0
-    float maxValue;
-    float r, g, b;
-    float bgR, bgG, bgB;
-    bool showText;
-    std::string label;
-    bool enabled;
+    float rotation;
+    float r, g, b, a;
+    int layer;
+    bool visible;
+    int currentFrame;
 
-    UIBar(float px, float py, float w, float h, float val = 1.0f)
-        : x(px), y(py), width(w), height(h), value(val), maxValue(1.0f),
-        r(0.3f), g(1.0f), b(0.3f),
-        bgR(0.2f), bgG(0.2f), bgB(0.2f),
-        showText(true), label(""), enabled(true) {
+    UISprite()
+        : sprite(nullptr)
+        , x(0), y(0)
+        , width(100), height(100)
+        , rotation(0)
+        , r(1), g(1), b(1), a(1)
+        , layer(0)
+        , visible(true)
+        , currentFrame(0)
+    {
     }
 };
 
@@ -46,41 +46,39 @@ class UIManager {
 public:
     static void Init();
     static void Shutdown();
+    static void Update(float dt);
     static void Render();
-    static void Clear();
 
-    // Text rendering
+    // Text functions
     static void AddText(const std::string& id, float x, float y, const std::string& text,
-        float r = 1.0f, float g = 1.0f, float b = 1.0f, void* font = nullptr);
+        float r, float g, float b, void* font);
     static void UpdateText(const std::string& id, const std::string& newText);
-    static void SetTextColor(const std::string& id, float r, float g, float b);
-    static void SetTextPosition(const std::string& id, float x, float y);
-    static void SetTextEnabled(const std::string& id, bool enabled);
     static void RemoveText(const std::string& id);
+    static void SetTextPosition(const std::string& id, float x, float y);
+    static void SetTextColor(const std::string& id, float r, float g, float b);
 
-    // Progress bars
-    static void AddBar(const std::string& id, float x, float y, float width, float height, float initialValue = 1.0f);
-    static void UpdateBar(const std::string& id, float value);
-    static void SetBarColor(const std::string& id, float r, float g, float b);
-    static void SetBarLabel(const std::string& id, const std::string& label);
-    static void SetBarEnabled(const std::string& id, bool enabled);
-    static void RemoveBar(const std::string& id);
+    // Sprite functions
+    static bool LoadSprite(const std::string& name, const std::string& filepath,
+        int frameColumns = 1, int frameRows = 1);
+    static void AddSprite(const std::string& id, const std::string& spriteName,
+        float x, float y, float width, float height);
+    static void RemoveSprite(const std::string& id);
+    static void SetSpritePosition(const std::string& id, float x, float y);
+    static void SetSpriteSize(const std::string& id, float width, float height);
+    static void SetSpriteRotation(const std::string& id, float degrees);
+    static void SetSpriteColor(const std::string& id, float r, float g, float b, float a = 1.0f);
+    static void SetSpriteLayer(const std::string& id, int layer);
+    static void SetSpriteVisible(const std::string& id, bool visible);
+    static void SetSpriteFrame(const std::string& id, int frame);
+    static void PlaySpriteAnimation(const std::string& id, int startFrame, int endFrame, float speed);
 
-    // Quick helpers (for temporary debug text)
-    static void DrawDebugText(float x, float y, const std::string& text);
-    static void DrawFPS(float deltaTime, float x = 20, float y = 20);
-
-    // Screen dimensions helpers
-    static float GetScreenWidth();
-    static float GetScreenHeight();
+    // Utility
+    static bool IsPointInSprite(const std::string& id, float x, float y);
 
 private:
-    static std::vector<std::pair<std::string, UIText>> texts;
-    static std::vector<std::pair<std::string, UIBar>> bars;
-
-    static float fpsAccumulator;
-    static int frameCount;
-    static float currentFPS;
+    static std::map<std::string, UIText> texts;
+    static std::map<std::string, UISprite> sprites;
+    static std::map<std::string, CSimpleSprite*> loadedSprites;
 };
 
 #endif

@@ -1,222 +1,288 @@
-//-----------------------------------------------------------------------------
+﻿//-----------------------------------------------------------------------------
 // UIManager.cpp
 //-----------------------------------------------------------------------------
+
 #include "UIManager.h"
-#include "App.h"
-#include "AppSettings.h"
-#include <cstdio>
+#include "../Utilities/Logger.h"
+#include "../ContestAPI/App.h"
 #include <algorithm>
 
-// Static member initialization
-std::vector<std::pair<std::string, UIText>> UIManager::texts;
-std::vector<std::pair<std::string, UIBar>> UIManager::bars;
-float UIManager::fpsAccumulator = 0.0f;
-int UIManager::frameCount = 0;
-float UIManager::currentFPS = 60.0f;
+// Static members
+std::map<std::string, UIText> UIManager::texts;
+std::map<std::string, UISprite> UIManager::sprites;
+std::map<std::string, CSimpleSprite*> UIManager::loadedSprites;
 
 void UIManager::Init() {
     texts.clear();
-    bars.clear();
-    fpsAccumulator = 0.0f;
-    frameCount = 0;
-    currentFPS = 60.0f;
+    sprites.clear();
+    loadedSprites.clear();
+    Logger::LogInfo("UIManager initialized");
 }
 
 void UIManager::Shutdown() {
     texts.clear();
-    bars.clear();
+    sprites.clear();
+
+    // Clean up loaded sprite textures
+    for (auto& pair : loadedSprites) {
+        delete pair.second;
+    }
+    loadedSprites.clear();
+
+    Logger::LogInfo("UIManager shutdown");
+}
+
+void UIManager::Update(float dt) {
+    // dt is in SECONDS, but CSimpleSprite expects MILLISECONDS
+    float dtMilliseconds = dt * 1000.0f;
+
+    // Update sprite animations
+    for (auto& pair : sprites) {
+        if (pair.second.sprite && pair.second.visible) {
+            pair.second.sprite->Update(dtMilliseconds);  // Pass milliseconds
+        }
+    }
 }
 
 void UIManager::Render() {
-    // Render all texts
-    for (auto& pair : texts) {
-        UIText& text = pair.second;
-        if (text.enabled) {
-            void* font = text.font ? text.font : GLUT_BITMAP_HELVETICA_12;
-            App::Print(text.x, text.y, text.text.c_str(), text.r, text.g, text.b, font);
+    // Sort sprites by layer
+    std::vector<std::pair<std::string, UISprite*>> sortedSprites;
+    for (auto& pair : sprites) {
+        if (pair.second.visible) {
+            sortedSprites.push_back({ pair.first, &pair.second });
         }
     }
 
-    // Render all bars
-    for (auto& pair : bars) {
-        UIBar& bar = pair.second;
-        if (!bar.enabled) continue;
+    std::sort(sortedSprites.begin(), sortedSprites.end(),
+        [](const auto& a, const auto& b) {
+            return a.second->layer < b.second->layer;
+        });
 
-        // Background
-        App::DrawLine(bar.x, bar.y, bar.x + bar.width, bar.y, bar.bgR, bar.bgG, bar.bgB);
-        App::DrawLine(bar.x, bar.y + bar.height, bar.x + bar.width, bar.y + bar.height,
-            bar.bgR, bar.bgG, bar.bgB);
-        App::DrawLine(bar.x, bar.y, bar.x, bar.y + bar.height, bar.bgR, bar.bgG, bar.bgB);
-        App::DrawLine(bar.x + bar.width, bar.y, bar.x + bar.width, bar.y + bar.height,
-            bar.bgR, bar.bgG, bar.bgB);
+    // Render sprites (bottom to top by layer)
+    for (auto& pair : sortedSprites) {
+        UISprite* s = pair.second;
+        if (s->sprite) {
+            s->sprite->SetPosition(s->x, s->y);
 
-        // Filled portion
-        float fillWidth = bar.width * (bar.value / bar.maxValue);
-        if (fillWidth > 0) {
-            for (float i = 0; i < bar.height; i += 2.0f) {
-                App::DrawLine(bar.x, bar.y + i, bar.x + fillWidth, bar.y + i,
-                    bar.r, bar.g, bar.b);
-            }
+            // Calculate scale
+            float frameWidth = s->sprite->GetWidth();
+            float scale = s->width / frameWidth;
+
+            s->sprite->SetScale(scale);
+            s->sprite->SetAngle(s->rotation);
+            s->sprite->SetColor(s->r, s->g, s->b);
+
+            // Just draw - let CSimpleSprite manage its own frame
+            s->sprite->Draw();
         }
+    }
 
-        // Label text
-        if (bar.showText && !bar.label.empty()) {
-            char labelText[128];
-            snprintf(labelText, sizeof(labelText), "%s: %.0f%%",
-                bar.label.c_str(), (bar.value / bar.maxValue) * 100.0f);
-            App::Print(bar.x + 5, bar.y + bar.height / 2 - 5, labelText,
-                1.0f, 1.0f, 1.0f, GLUT_BITMAP_HELVETICA_10);
-        }
+    // Render text on top
+    for (const auto& pair : texts) {
+        const UIText& text = pair.second;
+        App::Print(text.x, text.y, text.text.c_str(), text.r, text.g, text.b, text.font);
     }
 }
 
-void UIManager::Clear() {
-    texts.clear();
-    bars.clear();
+//-----------------------------------------------------------------------------
+// Sprite Functions
+//-----------------------------------------------------------------------------
+
+bool UIManager::LoadSprite(const std::string& name, const std::string& filepath,
+    int frameColumns, int frameRows) {
+    if (loadedSprites.find(name) != loadedSprites.end()) {
+        Logger::LogWarning(("Sprite '" + name + "' already loaded").c_str());
+        return true;
+    }
+
+    Logger::LogFormat("Loading sprite: %s from %s (%dx%d frames = %d total frames)\n",
+        name.c_str(), filepath.c_str(), frameColumns, frameRows,
+        frameColumns * frameRows);
+
+    CSimpleSprite* sprite = App::CreateSprite(filepath.c_str(), frameColumns, frameRows);
+
+    if (sprite != nullptr && sprite->GetWidth() > 0 && sprite->GetHeight() > 0) {
+        loadedSprites[name] = sprite;
+
+        // Calculate individual frame dimensions
+        float frameWidth = sprite->GetWidth();
+        float frameHeight = sprite->GetHeight();
+
+        Logger::LogFormat("SUCCESS: Loaded sprite '%s'\n", name.c_str());
+        Logger::LogFormat("  - Texture size: %.0fx%.0f pixels\n", frameWidth, frameHeight);
+        Logger::LogFormat("  - Grid: %dx%d frames\n", frameColumns, frameRows);
+        Logger::LogFormat("  - Each frame: %.0fx%.0f pixels\n",
+            frameWidth / frameColumns, frameHeight / frameRows);
+        Logger::LogFormat("  - Total frames: %d (0-%d)\n",
+            frameColumns * frameRows, frameColumns * frameRows - 1);
+
+        return true;
+    }
+    else {
+        Logger::LogFormat("ERROR: Failed to load sprite '%s' from %s\n",
+            name.c_str(), filepath.c_str());
+        if (sprite) delete sprite;
+        return false;
+    }
 }
+
+void UIManager::AddSprite(const std::string& id, const std::string& spriteName,
+    float x, float y, float width, float height) {
+    auto it = loadedSprites.find(spriteName);
+    if (it == loadedSprites.end()) {
+        Logger::LogFormat("ERROR: Cannot add sprite '%s': sprite '%s' not loaded\n",
+            id.c_str(), spriteName.c_str());
+        return;
+    }
+
+    UISprite newSprite;
+    newSprite.sprite = it->second;
+    newSprite.x = x;
+    newSprite.y = y;
+    newSprite.width = width;
+    newSprite.height = height;
+
+    sprites[id] = newSprite;
+
+    Logger::LogFormat("Added sprite '%s' at (%.1f, %.1f) size %.1fx%.1f\n",
+        id.c_str(), x, y, width, height);
+}
+
+void UIManager::RemoveSprite(const std::string& id) {
+    sprites.erase(id);
+}
+
+void UIManager::SetSpritePosition(const std::string& id, float x, float y) {
+    auto it = sprites.find(id);
+    if (it != sprites.end()) {
+        it->second.x = x;
+        it->second.y = y;
+    }
+}
+
+void UIManager::SetSpriteSize(const std::string& id, float width, float height) {
+    auto it = sprites.find(id);
+    if (it != sprites.end()) {
+        it->second.width = width;
+        it->second.height = height;
+    }
+}
+
+void UIManager::SetSpriteRotation(const std::string& id, float degrees) {
+    auto it = sprites.find(id);
+    if (it != sprites.end()) {
+        it->second.rotation = degrees;
+    }
+}
+
+void UIManager::SetSpriteColor(const std::string& id, float r, float g, float b, float a) {
+    auto it = sprites.find(id);
+    if (it != sprites.end()) {
+        it->second.r = r;
+        it->second.g = g;
+        it->second.b = b;
+        it->second.a = a;
+    }
+}
+
+void UIManager::SetSpriteLayer(const std::string& id, int layer) {
+    auto it = sprites.find(id);
+    if (it != sprites.end()) {
+        it->second.layer = layer;
+    }
+}
+
+void UIManager::SetSpriteVisible(const std::string& id, bool visible) {
+    auto it = sprites.find(id);
+    if (it != sprites.end()) {
+        it->second.visible = visible;
+    }
+}
+
+void UIManager::SetSpriteFrame(const std::string& id, int frame) {
+    auto it = sprites.find(id);
+    if (it != sprites.end() && it->second.sprite) {
+        it->second.sprite->SetFrame(frame);
+        it->second.currentFrame = frame;
+    }
+}
+
+void UIManager::PlaySpriteAnimation(const std::string& id, int startFrame, int endFrame, float speed) {
+    auto it = sprites.find(id);
+    if (it != sprites.end() && it->second.sprite) {
+        // Build frame vector
+        std::vector<int> frames;
+        for (int i = startFrame; i <= endFrame; i++) {
+            frames.push_back(i);
+        }
+
+        Logger::LogFormat("Creating animation for '%s': %d frames (", id.c_str(), (int)frames.size());
+        for (int f : frames) {
+            Logger::LogFormat("%d ", f);
+        }
+        Logger::LogLine(")");
+
+        // Create animation (ID 0, speed in seconds per frame, frame list)
+        it->second.sprite->CreateAnimation(0, speed, frames);
+        it->second.sprite->SetAnimation(0, true);  // Play from beginning
+
+        Logger::LogFormat("Animation started for '%s'\n", id.c_str());
+    }
+}
+
+bool UIManager::IsPointInSprite(const std::string& id, float x, float y) {
+    auto it = sprites.find(id);
+    if (it != sprites.end() && it->second.visible) {
+        const UISprite& s = it->second;
+        float halfW = s.width / 2.0f;
+        float halfH = s.height / 2.0f;
+        return (x >= s.x - halfW && x <= s.x + halfW &&
+            y >= s.y - halfH && y <= s.y + halfH);
+    }
+    return false;
+}
+
+//-----------------------------------------------------------------------------
+// Text Functions
+//-----------------------------------------------------------------------------
 
 void UIManager::AddText(const std::string& id, float x, float y, const std::string& text,
     float r, float g, float b, void* font) {
-    // Remove if exists
-    RemoveText(id);
-
-    UIText uiText(x, y, text, r, g, b, font);
-    texts.push_back(std::make_pair(id, uiText));
+    UIText newText;
+    newText.text = text;
+    newText.x = x;
+    newText.y = y;
+    newText.r = r;
+    newText.g = g;
+    newText.b = b;
+    newText.font = font;
+    texts[id] = newText;
 }
 
 void UIManager::UpdateText(const std::string& id, const std::string& newText) {
-    for (auto& pair : texts) {
-        if (pair.first == id) {
-            pair.second.text = newText;
-            return;
-        }
-    }
-}
-
-void UIManager::SetTextColor(const std::string& id, float r, float g, float b) {
-    for (auto& pair : texts) {
-        if (pair.first == id) {
-            pair.second.r = r;
-            pair.second.g = g;
-            pair.second.b = b;
-            return;
-        }
-    }
-}
-
-void UIManager::SetTextPosition(const std::string& id, float x, float y) {
-    for (auto& pair : texts) {
-        if (pair.first == id) {
-            pair.second.x = x;
-            pair.second.y = y;
-            return;
-        }
-    }
-}
-
-void UIManager::SetTextEnabled(const std::string& id, bool enabled) {
-    for (auto& pair : texts) {
-        if (pair.first == id) {
-            pair.second.enabled = enabled;
-            return;
-        }
+    auto it = texts.find(id);
+    if (it != texts.end()) {
+        it->second.text = newText;
     }
 }
 
 void UIManager::RemoveText(const std::string& id) {
-    texts.erase(
-        std::remove_if(texts.begin(), texts.end(),
-            [&id](const std::pair<std::string, UIText>& pair) {
-                return pair.first == id;
-            }),
-        texts.end()
-    );
+    texts.erase(id);
 }
 
-void UIManager::AddBar(const std::string& id, float x, float y, float width, float height,
-    float initialValue) {
-    // Remove if exists
-    RemoveBar(id);
-
-    UIBar bar(x, y, width, height, initialValue);
-    bars.push_back(std::make_pair(id, bar));
-}
-
-void UIManager::UpdateBar(const std::string& id, float value) {
-    for (auto& pair : bars) {
-        if (pair.first == id) {
-            pair.second.value = value;
-            if (pair.second.value < 0.0f) pair.second.value = 0.0f;
-            if (pair.second.value > pair.second.maxValue) {
-                pair.second.value = pair.second.maxValue;
-            }
-            return;
-        }
+void UIManager::SetTextPosition(const std::string& id, float x, float y) {
+    auto it = texts.find(id);
+    if (it != texts.end()) {
+        it->second.x = x;
+        it->second.y = y;
     }
 }
 
-void UIManager::SetBarColor(const std::string& id, float r, float g, float b) {
-    for (auto& pair : bars) {
-        if (pair.first == id) {
-            pair.second.r = r;
-            pair.second.g = g;
-            pair.second.b = b;
-            return;
-        }
+void UIManager::SetTextColor(const std::string& id, float r, float g, float b) {
+    auto it = texts.find(id);
+    if (it != texts.end()) {
+        it->second.r = r;
+        it->second.g = g;
+        it->second.b = b;
     }
-}
-
-void UIManager::SetBarLabel(const std::string& id, const std::string& label) {
-    for (auto& pair : bars) {
-        if (pair.first == id) {
-            pair.second.label = label;
-            return;
-        }
-    }
-}
-
-void UIManager::SetBarEnabled(const std::string& id, bool enabled) {
-    for (auto& pair : bars) {
-        if (pair.first == id) {
-            pair.second.enabled = enabled;
-            return;
-        }
-    }
-}
-
-void UIManager::RemoveBar(const std::string& id) {
-    bars.erase(
-        std::remove_if(bars.begin(), bars.end(),
-            [&id](const std::pair<std::string, UIBar>& pair) {
-                return pair.first == id;
-            }),
-        bars.end()
-    );
-}
-
-void UIManager::DrawDebugText(float x, float y, const std::string& text) {
-    App::Print(x, y, text.c_str(), 1.0f, 1.0f, 0.0f, GLUT_BITMAP_HELVETICA_10);
-}
-
-void UIManager::DrawFPS(float deltaTime, float x, float y) {
-    fpsAccumulator += deltaTime;
-    frameCount++;
-
-    if (fpsAccumulator >= 1000.0f) {
-        currentFPS = frameCount / (fpsAccumulator / 1000.0f);
-        fpsAccumulator = 0.0f;
-        frameCount = 0;
-    }
-
-    char fpsText[64];
-    snprintf(fpsText, sizeof(fpsText), "FPS: %.1f", currentFPS);
-    App::Print(x, y, fpsText, 0.3f, 1.0f, 0.3f, GLUT_BITMAP_HELVETICA_10);
-}
-
-float UIManager::GetScreenWidth() {
-    return APP_VIRTUAL_WIDTH;
-}
-
-float UIManager::GetScreenHeight() {
-    return APP_VIRTUAL_HEIGHT;
 }
