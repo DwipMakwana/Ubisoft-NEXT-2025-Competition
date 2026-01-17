@@ -52,6 +52,7 @@ struct Vec3 {
     Vec3 operator-(const Vec3& other) const { return Vec3(x - other.x, y - other.y, z - other.z); }
     Vec3 operator*(float scalar) const { return Vec3(x * scalar, y * scalar, z * scalar); }
     Vec3& operator+=(const Vec3& other) { x += other.x; y += other.y; z += other.z; return *this; }
+    Vec3& operator-=(const Vec3& other) { x -= other.x; y -= other.y; z -= other.z; return *this; }
 
     // Vector operations
     float Length() const { return sqrtf(x * x + y * y + z * z); }
