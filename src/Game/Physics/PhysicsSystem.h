@@ -39,7 +39,7 @@ public:
     // Main API
     PhysicsObject& SpawnBody(int type);
     void Update(float dt);
-    void Render(Camera3D& camera, Mesh3D& sphereMesh, Mesh3D& cubeMesh, bool wireframe);
+    void Render(Camera3D& camera, Mesh3D& sphereMesh, Mesh3D& cubeMesh, Mesh3D& cylinderMesh, bool wireframe);
 
     void SetSuzanneMesh(Mesh3D* mesh) { suzanneMeshRef = mesh; }
 

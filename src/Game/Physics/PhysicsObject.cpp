@@ -67,6 +67,27 @@ void PhysicsObject::SetSphere(float r) {
     UpdateInertia();
 }
 
+void PhysicsObject::SetCylinder(float r, float h) {
+    colliderType = ColliderType::CYLINDER;
+    radius = r;
+    height = h;
+
+    // Initialize halfExtents for collision purposes (treat as box)
+    halfExtents = Vec3(r, h * 0.5f, r);
+
+    // Calculate inertia for cylinder
+    float r2 = r * r;
+    float h2 = h * h;
+
+    inertia.x = mass * (3.0f * r2 + h2) / 12.0f;
+    inertia.y = mass * r2 / 2.0f;
+    inertia.z = mass * (3.0f * r2 + h2) / 12.0f;
+
+    invInertia.x = (inertia.x > 0) ? (1.0f / inertia.x) : 0;
+    invInertia.y = (inertia.y > 0) ? (1.0f / inertia.y) : 0;
+    invInertia.z = (inertia.z > 0) ? (1.0f / inertia.z) : 0;
+}
+
 void PhysicsObject::UpdateInertia() {
     if (invMass == 0.0f) {
         inertia = Vec3(0, 0, 0);

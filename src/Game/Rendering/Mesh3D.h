@@ -54,6 +54,7 @@ public:
     static Mesh3D CreateSphere(float radius = 1.0f, int segments = 16);
     static Mesh3D CreatePlane(float width = 1.0f, float height = 1.0f);
     static Mesh3D CreatePyramid(float baseSize, float height);
+    static Mesh3D CreateCylinder(float radius, float height, int segments = 16);
 
     // Helpers
     void CalculateBounds();

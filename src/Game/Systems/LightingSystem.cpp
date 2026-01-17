@@ -7,7 +7,7 @@
 #include <cmath>
 
 // Static member initialization
-Vec3 LightingSystem::lightDirection(0.3f, -1.0f, 0.5f);
+Vec3 LightingSystem::lightDirection(0.3f, 1.0f, 0.5f);
 Vec3 LightingSystem::lightColor(1.0f, 0.98f, 0.95f);
 float LightingSystem::lightIntensity = 0.8f;
 Vec3 LightingSystem::ambientColor(0.3f, 0.3f, 0.35f);

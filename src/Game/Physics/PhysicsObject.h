@@ -15,6 +15,7 @@ enum class ColliderType {
     BOX,
     PLANE,
     CONVEX_HULL,
+    CYLINDER,
 };
 
 struct Material {
@@ -82,6 +83,7 @@ public:
     void SetMass(float m);
     void SetBox(const Vec3& size);
     void SetSphere(float r);
+    void SetCylinder(float r, float h);
 
     // Force/Torque application
     void AddForce(const Vec3& f);

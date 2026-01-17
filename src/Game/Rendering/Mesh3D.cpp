@@ -329,6 +329,65 @@ Mesh3D Mesh3D::CreatePyramid(float baseSize, float height) {
     return mesh;
 }
 
+Mesh3D Mesh3D::CreateCylinder(float radius, float height, int segments) {
+    Mesh3D mesh;
+
+    // Helper lambda to add vertex
+    auto AddVertex = [&mesh](Vec3 pos, Vec3 norm, Vec2 uv) {
+        Vertex v;
+        v.position = pos;
+        v.normal = norm;
+        v.texCoord = uv;
+        mesh.vertices.push_back(v);
+        };
+
+    float halfHeight = height * 0.5f;
+
+    for (int i = 0; i < segments; i++) {
+        float angle1 = (float)i / (float)segments * 2.0f * 3.14159265359f;
+        float angle2 = (float)(i + 1) / (float)segments * 2.0f * 3.14159265359f;
+
+        float x1 = cosf(angle1);
+        float z1 = sinf(angle1);
+        float x2 = cosf(angle2);
+        float z2 = sinf(angle2);
+
+        Vec3 bottomV1(x1 * radius, -halfHeight, z1 * radius);
+        Vec3 bottomV2(x2 * radius, -halfHeight, z2 * radius);
+        Vec3 bottomCenter(0, -halfHeight, 0);
+
+        Vec3 topV1(x1 * radius, halfHeight, z1 * radius);
+        Vec3 topV2(x2 * radius, halfHeight, z2 * radius);
+        Vec3 topCenter(0, halfHeight, 0);
+
+        Vec3 normalSide1(x1, 0, z1);
+        Vec3 normalSide2(x2, 0, z2);
+
+        // --- SIDE WALLS --- (FIXED WINDING ORDER)
+        // First triangle: bottom1, top2, top1  (REVERSED)
+        AddVertex(bottomV1, normalSide1, Vec2(0, 0));
+        AddVertex(topV2, normalSide2, Vec2(1, 1));
+        AddVertex(topV1, normalSide1, Vec2(0, 1));
+
+        // Second triangle: bottom1, bottom2, top2  (REVERSED)
+        AddVertex(bottomV1, normalSide1, Vec2(0, 0));
+        AddVertex(bottomV2, normalSide2, Vec2(1, 0));
+        AddVertex(topV2, normalSide2, Vec2(1, 1));
+
+        // --- BOTTOM CAP --- (REVERSED - clockwise when looking from below)
+        AddVertex(bottomCenter, Vec3(0, -1, 0), Vec2(0.5f, 0.5f));
+        AddVertex(bottomV2, Vec3(0, -1, 0), Vec2(0, 0));
+        AddVertex(bottomV1, Vec3(0, -1, 0), Vec2(1, 0));
+
+        // --- TOP CAP --- (CORRECT - counter-clockwise when looking from above)
+        AddVertex(topCenter, Vec3(0, 1, 0), Vec2(0.5f, 0.5f));
+        AddVertex(topV1, Vec3(0, 1, 0), Vec2(0, 0));
+        AddVertex(topV2, Vec3(0, 1, 0), Vec2(1, 0));
+    }
+
+    return mesh;
+}
+
 Mesh3D Mesh3D::CreatePlane(float width, float height) {
     Mesh3D mesh;
     float hw = width * 0.5f;

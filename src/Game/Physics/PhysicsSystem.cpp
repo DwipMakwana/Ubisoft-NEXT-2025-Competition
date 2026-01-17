@@ -94,6 +94,14 @@ PhysicsObject& PhysicsSystem::SpawnBody(int type) {
             obj.material.dynamicFriction = 0.65f;
         }
         break;
+	case 3: // Cylinder
+        obj.colliderType = ColliderType::CYLINDER;
+        obj.SetCylinder(0.5f, 1.5f);  // radius 0.5, height 1.5
+        obj.SetMass(1.0f);
+        obj.material.restitution = 0.2f;
+        obj.material.staticFriction = 0.8f;
+        obj.material.dynamicFriction = 0.6f;
+        break;
 
     default:
         // Default to sphere
@@ -212,76 +220,94 @@ bool PhysicsSystem::DetectCollision(PhysicsObject& a, PhysicsObject& b, ContactM
     }
 
     // Convex hull vs convex hull
-    if (a.colliderType == ColliderType::CONVEX_HULL && b.colliderType == ColliderType::CONVEX_HULL) {
+    if (a.colliderType == ColliderType::CONVEX_HULL &&
+        b.colliderType == ColliderType::CONVEX_HULL) {
         return Collision3D::ConvexHullConvexHull(*a.convexHull, *b.convexHull, manifold);
     }
-    
+
+    // --- TREAT CYLINDERS AS BOXES FOR COLLISION ---
+    ColliderType originalTypeA = a.colliderType;
+    ColliderType originalTypeB = b.colliderType;
+    Vec3 originalHalfExtentsA = a.halfExtents;
+    Vec3 originalHalfExtentsB = b.halfExtents;
+
+    // Convert cylinder A to box temporarily
+    if (a.colliderType == ColliderType::CYLINDER) {
+        a.colliderType = ColliderType::BOX;
+        a.halfExtents = Vec3(a.radius, a.height * 0.5f, a.radius);
+    }
+
+    // Convert cylinder B to box temporarily
+    if (b.colliderType == ColliderType::CYLINDER) {
+        b.colliderType = ColliderType::BOX;
+        b.halfExtents = Vec3(b.radius, b.height * 0.5f, b.radius);
+    }
+
     // Broad phase
     float maxRadius = (a.colliderType == ColliderType::SPHERE) ? a.radius : a.halfExtents.Length();
     maxRadius += (b.colliderType == ColliderType::SPHERE) ? b.radius : b.halfExtents.Length();
 
-    if ((b.position - a.position).LengthSquared() > maxRadius * maxRadius * 4.0f) {
+    if ((b.position - a.position).LengthSquared() > (maxRadius * maxRadius * 4.0f)) {
+        // Restore original types before returning
+        a.colliderType = originalTypeA;
+        b.colliderType = originalTypeB;
+        a.halfExtents = originalHalfExtentsA;
+        b.halfExtents = originalHalfExtentsB;
         return false;
     }
 
     // Narrow phase
+    bool collision = false;
+
     if (a.colliderType == ColliderType::SPHERE && b.colliderType == ColliderType::SPHERE) {
         Sphere3D sphereA, sphereB;
         GetSphere(a, sphereA);
         GetSphere(b, sphereB);
-        return Collision3D::SphereSphere(sphereA, sphereB, manifold);
+        collision = Collision3D::SphereSphere(sphereA, sphereB, manifold);
     }
     else if (a.colliderType == ColliderType::BOX && b.colliderType == ColliderType::BOX) {
         OBB3D obbA, obbB;
         GetOBB(a, obbA);
         GetOBB(b, obbB);
-        return Collision3D::OBBOBB(obbA, obbB, manifold);
+        collision = Collision3D::OBBOBB(obbA, obbB, manifold);
     }
     else {
-        // Sphere vs Box
-        // SphereOBB returns normal pointing from BOX to SPHERE
-        // We need normal pointing from A to B
-
+        // Sphere vs Box (or converted cylinder-as-box)
         Sphere3D s;
         OBB3D o;
 
         if (a.colliderType == ColliderType::SPHERE) {
-            // A = sphere, B = box
             GetSphere(a, s);
             GetOBB(b, o);
+            collision = Collision3D::SphereOBB(s, o, manifold);
 
-            bool hit = Collision3D::SphereOBB(s, o, manifold);
-
-            // SphereOBB normal points box->sphere
-            // We need A->B which is sphere->box
-            // So FLIP the normal
-            if (hit) {
+            // Flip normal (SphereOBB returns box->sphere, we need A->B)
+            if (collision) {
                 for (int i = 0; i < manifold.numContacts; i++) {
                     manifold.contacts[i].normal = manifold.contacts[i].normal * -1.0f;
                 }
             }
-            return hit;
         }
         else {
-            // A = box, B = sphere
             GetSphere(b, s);
             GetOBB(a, o);
-
-            bool hit = Collision3D::SphereOBB(s, o, manifold);
-
-            // SphereOBB normal points box->sphere which is A->B
-            // This is correct, NO flip needed
-            return hit;
+            collision = Collision3D::SphereOBB(s, o, manifold);
         }
     }
 
-    return false;
+    // Restore original collider types
+    a.colliderType = originalTypeA;
+    b.colliderType = originalTypeB;
+    a.halfExtents = originalHalfExtentsA;
+    b.halfExtents = originalHalfExtentsB;
+
+    return collision;
 }
 
 bool PhysicsSystem::DetectGroundCollision(PhysicsObject& obj, ContactManifold& manifold) {
-    if (fabsf(obj.position.x) > planeSizeX ||
-        fabsf(obj.position.z) > planeSizeZ) {
-        return false;  // Object is outside plane bounds
+    // Check if outside plane bounds
+    if (fabsf(obj.position.x) > planeSizeX || fabsf(obj.position.z) > planeSizeZ) {
+        return false;
     }
 
     if (obj.colliderType == ColliderType::CONVEX_HULL) {
@@ -292,23 +318,40 @@ bool PhysicsSystem::DetectGroundCollision(PhysicsObject& obj, ContactManifold& m
         Sphere3D sphere;
         GetSphere(obj, sphere);
 
-        // Check if sphere center is within plane bounds
         const float PLANE_HALF_SIZE = 10.0f;
         if (fabsf(sphere.center.x) > PLANE_HALF_SIZE ||
             fabsf(sphere.center.z) > PLANE_HALF_SIZE) {
-            return false;  // Outside bounds, no collision
+            return false;
         }
 
         return Collision3D::SpherePlane(sphere, *groundPlane, manifold);
     }
-    else if (obj.colliderType == ColliderType::BOX) {
+    else if (obj.colliderType == ColliderType::BOX ||
+        obj.colliderType == ColliderType::CYLINDER) {
+
+        // Treat cylinder as box for ground collision
+        ColliderType originalType = obj.colliderType;
+        Vec3 originalHalfExtents = obj.halfExtents;
+
+        if (obj.colliderType == ColliderType::CYLINDER) {
+            obj.colliderType = ColliderType::BOX;
+            obj.halfExtents = Vec3(obj.radius, obj.height * 0.5f, obj.radius);
+        }
+
         OBB3D obb;
         GetOBB(obj, obb);
 
-        // Use bounded plane collision (20x20 = ±10 units)
         const float PLANE_HALF_SIZE = 10.0f;
-        return Collision3D::OBBPlane(obb, *groundPlane, manifold, PLANE_HALF_SIZE, PLANE_HALF_SIZE);
+        bool collision = Collision3D::OBBPlane(obb, *groundPlane, manifold,
+            PLANE_HALF_SIZE, PLANE_HALF_SIZE);
+
+        // Restore original type
+        obj.colliderType = originalType;
+        obj.halfExtents = originalHalfExtents;
+
+        return collision;
     }
+
     return false;
 }
 
@@ -620,7 +663,7 @@ void PhysicsSystem::Update(float dt) {
 // Rendering
 //-----------------------------------------------------------------------------
 
-void PhysicsSystem::Render(Camera3D& camera, Mesh3D& sphereMesh, Mesh3D& cubeMesh, bool wireframe) {
+void PhysicsSystem::Render(Camera3D& camera, Mesh3D& sphereMesh, Mesh3D& cubeMesh, Mesh3D& cylinderMesh, bool wireframe) {
     for (const auto& body : bodies) {
         // Convert rotation from radians to degrees for rendering
         Vec3 rotDegrees = body.rotation * (180.0f / 3.14159265359f);
@@ -646,6 +689,15 @@ void PhysicsSystem::Render(Camera3D& camera, Mesh3D& sphereMesh, Mesh3D& cubeMes
                 size,
                 camera,
                 1.0f, 0.4f, 0.3f,
+                wireframe
+            );
+        }
+        else if (body.colliderType == ColliderType::CYLINDER) {
+            // Render cylinder with radius and height
+            Renderer3D::DrawMesh(
+                cylinderMesh, body.position, rotDegrees,
+                Vec3(body.radius, body.height, body.radius), camera,
+                0.8f, 0.8f, 0.2f, // Yellow color
                 wireframe
             );
         }
