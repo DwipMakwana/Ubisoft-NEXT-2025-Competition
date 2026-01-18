@@ -13,10 +13,6 @@ Player::Player()
     , acceleration(120.0f)      // INCREASED from 50.0f (much faster)
     , maxSpeed(50.0f)           // INCREASED from 25.0f (way faster)
     , drag(0.98f)
-    , minX(-53.5f)
-    , maxX(53.5f)
-    , minY(-40.0f)
-    , maxY(40.0f)
     , size(0.8f)
 {
 }
@@ -72,12 +68,6 @@ void Player::Update(float deltaTime) {
     position.x += velocity.x * dt;
     position.y += velocity.y * dt;
 
-    // Clamp to bounds
-    if (position.x < minX) { position.x = minX; velocity.x = 0.0f; }
-    if (position.x > maxX) { position.x = maxX; velocity.x = 0.0f; }
-    if (position.y < minY) { position.y = minY; velocity.y = 0.0f; }
-    if (position.y > maxY) { position.y = maxY; velocity.y = 0.0f; }
-
     // === MOUSE AIM ===
     float mouseX, mouseY;
     App::GetMousePos(mouseX, mouseY);
@@ -85,10 +75,19 @@ void Player::Update(float deltaTime) {
     // Convert mouse screen coords to world coords
     // Screen: (0,0) top-left, (1024, 768) bottom-right
     // World: centered at (0,0), visible area ~80x60 units
-// Method 2: Direct ratio conversion
-    float worldMouseX = ((mouseX / 1024.0f) - 0.5f) * 80.0f;   // -40 to +40
-    float worldMouseY = -((mouseY / 768.0f) - 0.5f) * 60.0f;   // -30 to +30
+    
+    // Calculate world offset from screen center
+    float screenCenterX = 1024.0f / 2.0f;
+    float screenCenterY = 768.0f / 2.0f;
 
+    float mouseOffsetX = (mouseX - screenCenterX) / 1024.0f * 80.0f;  // Screen to world scale
+    float mouseOffsetY = -(mouseY - screenCenterY) / 768.0f * 60.0f;  // Flip Y, scale
+
+    // World position = player position + mouse offset
+    float worldMouseX = position.x + mouseOffsetX;
+    float worldMouseY = position.y + mouseOffsetY;
+
+    // Calculate aim angle
     float dx = worldMouseX - position.x;
     float dy = worldMouseY - position.y;
     aimAngle = atan2f(dy, dx) * 180.0f / 3.14159f;

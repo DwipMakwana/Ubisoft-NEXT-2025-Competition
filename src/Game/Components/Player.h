@@ -23,10 +23,6 @@ private:
     float maxSpeed;
     float drag;
 
-    // Movement bounds
-    float minX, maxX;
-    float minY, maxY;
-
     // Visual
     float size;
     Mesh3D mesh;
@@ -48,6 +44,13 @@ public:
 
     // Setters
     void SetPosition(const Vec3& pos) { position = pos; }
+
+    // Apply knockback force to player
+    void ApplyKnockback(const Vec3& force) {
+        velocity.x -= force.x;
+        velocity.y -= force.y;
+        velocity.z -= force.z;
+    }
 };
 
 #endif
