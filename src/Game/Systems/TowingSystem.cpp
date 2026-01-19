@@ -160,6 +160,7 @@ int TowingSystem::FindNearestPlanet(const Vec3& playerPos, PlanetSystem* planetS
 
     for (int i = 0; i < maxPlanets; i++) {
         if (!planets[i].active) continue;
+        if (!planets[i].isHomePlanet) continue;
 
         float dx = planets[i].position.x - playerPos.x;
         float dy = planets[i].position.y - playerPos.y;
@@ -267,7 +268,7 @@ void TowingSystem::Render(const Camera3D& camera, AsteroidSystem* asteroidSystem
     if (highlightedAsteroidIndex >= 0 && asteroidSystem) {
         Asteroid* ast = &asteroidSystem->GetAsteroids()[highlightedAsteroidIndex];
         if (ast->active) {
-            //RenderHighlight(ast->position, ast->size * 1.3f, camera, 0.3f, 0.3f, 0.3f);
+            RenderHighlight(ast->position, ast->size * 1.3f, camera, 0.3f, 0.3f, 0.3f);
 
             // === UPDATED: Show smaller resource value ===
             float sizeMultiplier = ast->size / 2.0f;
@@ -281,7 +282,7 @@ void TowingSystem::Render(const Camera3D& camera, AsteroidSystem* asteroidSystem
             sprintf(infoText, "[E] Grab - %s: +%.0f",
                 mineralNames[ast->mineralType], resourceValue);
 
-            //RenderInteractionPrompt(ast->position, infoText, camera);
+            RenderInteractionPrompt(ast->position, infoText, camera);
         }
     }
 
@@ -289,11 +290,11 @@ void TowingSystem::Render(const Camera3D& camera, AsteroidSystem* asteroidSystem
     // Render highlighted planet
     if (highlightedPlanetIndex >= 0 && planetSystem) {
         const Planet* planet = &planetSystem->GetPlanets()[highlightedPlanetIndex];
-        if (planet->active) {
-            //RenderHighlight(planet->position, planet->size * 1.2f, camera, 0.7f, 0.7f, 0.7f);
+        if (planet->active && strcmp(planet->name, "Home Planet") == 0) {
+            RenderHighlight(planet->position, planet->size * 1.2f, camera, 0.7f, 0.7f, 0.7f);
 
             // Show interaction prompt
-            //RenderInteractionPrompt(planet->position + Vec3(0.0f, planet->size, 0.0f), "[E] Deposit", camera);
+            RenderInteractionPrompt(planet->position + Vec3(0.0f, planet->size, 0.0f), "[E] Deposit", camera);
         }
     }
 }

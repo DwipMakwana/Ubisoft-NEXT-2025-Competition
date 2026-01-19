@@ -18,6 +18,8 @@ struct Planet {
     float currentRotation;
     bool active;
 
+    bool isHomePlanet = false;
+
     // Sector tracking
     int sectorX;
     int sectorY;

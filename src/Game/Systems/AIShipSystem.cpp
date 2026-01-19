@@ -73,29 +73,21 @@ void AIShipSystem::SpawnForActivePlanets(PlanetSystem& planetSystem)
     const Planet* planets = planetSystem.GetPlanets();
     int maxPlanets = planetSystem.GetMaxPlanets();
 
-    // Calculate average resource need (0-1, lower = more desperate)
-    float avgResource = 0.0f;
-    int activePlanetCount = 0;
     for (int p = 0; p < maxPlanets; p++)
     {
         if (!planets[p].active) continue;
+
+        // SKIP HOME PLANET (DOUBLE CHECK!)
+        if (planets[p].isHomePlanet) continue;
+
+        // PER-PLANET DESPERATION (not global average!)
         float planetAvg = (planets[p].ironLevel + planets[p].waterLevel +
             planets[p].carbonLevel + planets[p].energyLevel) / 400.0f;
-        avgResource += planetAvg;
-        activePlanetCount++;
-    }
-    if (activePlanetCount == 0) return;
-    avgResource /= activePlanetCount;
 
-    // Scale ships: low resources = more ships (3 min, 7 max)
-    int targetShipsPerPlanet = 3 + (int)((1.0f - avgResource) * 4.0f);
-    targetShipsPerPlanet = std::clamp(targetShipsPerPlanet, 3, 7);
+        int targetShips = 3 + (int)((1.0f - planetAvg) * 4.0f);
+        targetShips = std::clamp(targetShips, 3, 7);
 
-    for (int p = 0; p < maxPlanets; p++)
-    {
-        if (!planets[p].active) continue;
-
-        // Count existing ships for this planet
+        // Count EXISTING ships for THIS planet
         int currentShips = 0;
         for (int i = 0; i < MAX_AI_SHIPS; i++)
         {
@@ -103,15 +95,15 @@ void AIShipSystem::SpawnForActivePlanets(PlanetSystem& planetSystem)
                 currentShips++;
         }
 
-        // Spawn missing ships
-        for (int needed = currentShips; needed < targetShipsPerPlanet; needed++)
+        // Spawn ONLY missing ships for THIS planet
+        for (int needed = currentShips; needed < targetShips; needed++)
         {
             int slot = -1;
             for (int i = 0; i < MAX_AI_SHIPS; i++)
             {
                 if (!ships[i].active) { slot = i; break; }
             }
-            if (slot < 0) break;  // No slots
+            if (slot < 0) break;
 
             SpawnShip(slot, p, planetSystem);
         }

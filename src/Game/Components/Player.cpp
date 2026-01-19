@@ -104,7 +104,7 @@ void Player::Render(const Camera3D& camera) {
     Renderer3D::DrawMesh(mesh, position, rotation,
         Vec3(size, size, size),
         camera,
-        0.0f, 1.0f, 0.0f,  // Green
+        1.0f, 1.0f, 1.0f,  // White
         false);
 }
 

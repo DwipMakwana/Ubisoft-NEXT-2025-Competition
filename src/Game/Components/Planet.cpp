@@ -1,4 +1,4 @@
-//------------------------------------------------------------------------
+ï»¿//------------------------------------------------------------------------
 // Planet.cpp - Persistent planet system
 //------------------------------------------------------------------------
 #include "Planet.h"
@@ -67,13 +67,13 @@ void PlanetSystem::DrawResourceGauge(const Planet& planet, const Camera3D& camer
         float angle;  // Angle in radians (0 = right, -PI/2 = top, etc.)
     };
 
-    // Arrange in top-right quadrant (angles from -45° to +45° from top-right)
+    // Arrange in top-right quadrant (angles from -45Â° to +45Â° from top-right)
     // Think of it like a speedometer arc from 10 o'clock to 2 o'clock
     ResourceInfo resources[4] = {
-        { "Water",  planet.waterLevel,  0.3f, 0.6f, 1.0f, -0.7854f },   // ~45° up-right (10:30 position)
-        { "Energy", planet.energyLevel, 1.0f, 1.0f, 0.3f, -0.3927f },   // ~22° up-right (11:30 position)
-        { "Carbon", planet.carbonLevel, 0.3f, 1.0f, 0.3f,  0.0f },      // 0° right (12:00 position)
-        { "Iron",   planet.ironLevel,   1.0f, 0.3f, 0.3f,  0.3927f }    // ~22° down-right (1:30 position)
+        { "Water",  planet.waterLevel,  0.3f, 0.6f, 1.0f, -0.7854f },   // ~45Â° up-right (10:30 position)
+        { "Energy", planet.energyLevel, 1.0f, 1.0f, 0.3f, -0.3927f },   // ~22Â° up-right (11:30 position)
+        { "Carbon", planet.carbonLevel, 0.3f, 1.0f, 0.3f,  0.0f },      // 0Â° right (12:00 position)
+        { "Iron",   planet.ironLevel,   1.0f, 0.3f, 0.3f,  0.3927f }    // ~22Â° down-right (1:30 position)
     };
 
     // Distance from planet center for text
@@ -140,13 +140,34 @@ void PlanetSystem::Init() {
     // Higher detail sphere for planets (they're larger)
     planetMesh = Mesh3D::CreateSphere(1.0f, 16);
 
-    Logger::LogInfo("PlanetSystem: Initialized");
-
     // Load initial sectors (3x3 grid around origin = up to 9 planets)
     LoadSectorsAroundPlayer(Vec3(0, 0, 0));
     lastPlayerPos = Vec3(0, 0, 0);
 
-    Logger::LogFormat("Initial planets loaded: %d", GetActivePlanetCount());
+    // SPAWN HOME PLANET (always sector 0,0, white)
+    int homeSlot = -1;
+    for (int i = 0; i < MAX_PLANETS; i++)
+    {
+        if (!planets[i].active) { homeSlot = i; break; }
+    }
+    if (homeSlot != -1)
+    {
+        planets[homeSlot].position = Vec3(0, 0, 0);  // Fixed spawn
+        planets[homeSlot].size = 12.0f;
+        planets[homeSlot].sectorX = 0;
+        planets[homeSlot].sectorY = 0;
+        planets[homeSlot].active = true;
+        planets[homeSlot].isHomePlanet = true;
+        strcpy(planets[homeSlot].name, "Home Planet");
+
+        // FIXED WHITE regardless of resources
+        planets[homeSlot].ironLevel = 50;
+        planets[homeSlot].waterLevel = 50;
+        planets[homeSlot].carbonLevel = 50;
+        planets[homeSlot].energyLevel = 50;
+
+        planets[homeSlot].rotationSpeed = 15.0f;
+    }
 }
 
 void PlanetSystem::WorldToSector(const Vec3& worldPos, int& sectorX, int& sectorY) const {
@@ -361,16 +382,16 @@ void PlanetSystem::Render(const Camera3D& camera) {
         float avgResource = (planets[i].ironLevel + planets[i].waterLevel +
             planets[i].carbonLevel + planets[i].energyLevel) / 400.0f;
 
-        float baseBright = 0.6f + avgResource * 0.4f;  // 0.6?1.0 (bright!)
+        float baseBright = 0.6f + avgResource * 0.4f;  // 0.6â†’1.0 (bright!)
 
         float r, g, b;
         // Hue cycle for variety (bright rainbow)
-        float hue = avgResource * 300.0f;  // 0?300 degrees
+        float hue = avgResource * 300.0f;  // 0â†’300 degrees
         float h = fmodf(hue / 60.0f, 6.0f);
         float s = 0.8f + avgResource * 0.2f;
         float v = baseBright;
 
-        // HSV ? RGB (bright colors)
+        // HSV â†’ RGB (bright colors)
         float c = v * s;
         float x = c * (1.0f - fabsf(fmodf(h, 2.0f) - 1.0f));
         float m = v - c;
@@ -384,9 +405,19 @@ void PlanetSystem::Render(const Camera3D& camera) {
 
         r += m; g += m; b += m;
 
-        Renderer3D::DrawMesh(planetMesh, planets[i].position, rotation,
-            Vec3(planets[i].size, planets[i].size, planets[i].size),
-            camera, r, g, b, false);
+        bool isHomePlanet = (strcmp(planets[i].name, "Home Planet") == 0);
+        if (isHomePlanet)
+        {
+            Renderer3D::DrawMesh(planetMesh, planets[i].position, rotation,
+                Vec3(planets[i].size, planets[i].size, planets[i].size),
+                camera, 1.0f, 1.0f, 1.0f, false);
+        }
+        else
+        {
+            Renderer3D::DrawMesh(planetMesh, planets[i].position, rotation,
+                Vec3(planets[i].size, planets[i].size, planets[i].size),
+                camera, r, g, b, false);
+        }
 
         float labelOffset = -(planets[i].size + 3.0f);  // Negative = below
 
