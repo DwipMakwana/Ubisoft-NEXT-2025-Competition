@@ -29,6 +29,8 @@ struct Asteroid {
     Vec3 position;
     Vec3 velocity;
 
+    int claimedByAIShip = -1;
+
     float size;            // radius
     float mass;
 

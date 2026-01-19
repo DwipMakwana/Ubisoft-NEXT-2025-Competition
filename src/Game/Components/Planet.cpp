@@ -357,13 +357,36 @@ void PlanetSystem::Render(const Camera3D& camera) {
 
         Vec3 rotation(0, 0, planets[i].currentRotation);
 
-        // Visual feedback: Color by resource levels
+        // BRIGHT PALETTE based on resources [Replace existing color code]
         float avgResource = (planets[i].ironLevel + planets[i].waterLevel +
             planets[i].carbonLevel + planets[i].energyLevel) / 400.0f;
 
+        float baseBright = 0.6f + avgResource * 0.4f;  // 0.6?1.0 (bright!)
+
+        float r, g, b;
+        // Hue cycle for variety (bright rainbow)
+        float hue = avgResource * 300.0f;  // 0?300 degrees
+        float h = fmodf(hue / 60.0f, 6.0f);
+        float s = 0.8f + avgResource * 0.2f;
+        float v = baseBright;
+
+        // HSV ? RGB (bright colors)
+        float c = v * s;
+        float x = c * (1.0f - fabsf(fmodf(h, 2.0f) - 1.0f));
+        float m = v - c;
+
+        if (h <= 1.0f) { r = c; g = x; b = 0; }
+        else if (h <= 2.0f) { r = x; g = c; b = 0; }
+        else if (h <= 3.0f) { r = 0; g = c; b = x; }
+        else if (h <= 4.0f) { r = 0; g = x; b = c; }
+        else if (h <= 5.0f) { r = x; g = 0; b = c; }
+        else { r = c; g = 0; b = x; }
+
+        r += m; g += m; b += m;
+
         Renderer3D::DrawMesh(planetMesh, planets[i].position, rotation,
             Vec3(planets[i].size, planets[i].size, planets[i].size),
-            camera, 0.3f + avgResource * 0.7f, avgResource, 0.3f, false);
+            camera, r, g, b, false);
 
         float labelOffset = -(planets[i].size + 3.0f);  // Negative = below
 

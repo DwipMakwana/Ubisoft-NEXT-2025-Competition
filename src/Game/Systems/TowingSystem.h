@@ -49,15 +49,19 @@ public:
     bool IsTowing() const { return isTowing; }
     int GetTowedAsteroidIndex() const { return towedAsteroidIndex; }
 
+    // AI helpers (non-input)
+    bool TryGrabAsteroid(int asteroidIndex, const Vec3& shipPos, AsteroidSystem* asteroidSystem);
+    bool TryDepositAtPlanet(int planetIndex, AsteroidSystem* asteroidSystem, PlanetSystem* planetSystem);
+
+    void GrabAsteroid(int asteroidIndex, const Vec3& playerPos, AsteroidSystem* asteroidSystem);
+    void DepositAsteroid(int planetIndex, AsteroidSystem* asteroidSystem,PlanetSystem* planetSystem);
+
 private:
     // Find nearest interactable object
     int FindNearestAsteroid(const Vec3& playerPos, AsteroidSystem* asteroidSystem);
     int FindNearestPlanet(const Vec3& playerPos, PlanetSystem* planetSystem);
 
     // Actions
-    void GrabAsteroid(int asteroidIndex, const Vec3& playerPos, AsteroidSystem* asteroidSystem);
-    void DepositAsteroid(int planetIndex, AsteroidSystem* asteroidSystem,
-        PlanetSystem* planetSystem);
     void ReleaseAsteroid();
 
     // Rendering helpers

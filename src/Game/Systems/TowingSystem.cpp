@@ -14,7 +14,7 @@ TowingSystem::TowingSystem()
     , highlightedPlanetIndex(-1)
     , grabRange(5.0f)
     , ropeSlack(1.0f)
-    , ropeSegments(10)
+    , ropeSegments(2)
     , highlightPulse(0.0f)
 {
 }
@@ -104,6 +104,22 @@ void TowingSystem::HandleInput(const Vec3& playerPos, AsteroidSystem* asteroidSy
             ReleaseAsteroid();
         }
     }
+}
+
+bool TowingSystem::TryGrabAsteroid(int asteroidIndex, const Vec3& shipPos, AsteroidSystem* asteroidSystem)
+{
+    if (isTowing) return false;
+    if (!asteroidSystem) return false;
+    GrabAsteroid(asteroidIndex, shipPos, asteroidSystem);
+    return isTowing;
+}
+
+bool TowingSystem::TryDepositAtPlanet(int planetIndex, AsteroidSystem* asteroidSystem, PlanetSystem* planetSystem)
+{
+    if (!isTowing) return false;
+    if (!asteroidSystem || !planetSystem) return false;
+    DepositAsteroid(planetIndex, asteroidSystem, planetSystem);
+    return true;
 }
 
 int TowingSystem::FindNearestAsteroid(const Vec3& playerPos, AsteroidSystem* asteroidSystem) {
@@ -244,14 +260,14 @@ void TowingSystem::Render(const Camera3D& camera, AsteroidSystem* asteroidSystem
     PlanetSystem* planetSystem) {
     // Render rope if towing
     if (isTowing && towedAsteroidIndex >= 0) {
-        rope.Render(camera, 0.0f, 1.0f, 0.0f);  // Green rope color
+        rope.Render(camera, 1.0f, 1.0f, 1.0f);  // Green rope color
     }
 
     // Render highlighted asteroid
     if (highlightedAsteroidIndex >= 0 && asteroidSystem) {
         Asteroid* ast = &asteroidSystem->GetAsteroids()[highlightedAsteroidIndex];
         if (ast->active) {
-            RenderHighlight(ast->position, ast->size * 1.3f, camera, 0.3f, 0.3f, 0.3f);
+            //RenderHighlight(ast->position, ast->size * 1.3f, camera, 0.3f, 0.3f, 0.3f);
 
             // === UPDATED: Show smaller resource value ===
             float sizeMultiplier = ast->size / 2.0f;
@@ -265,7 +281,7 @@ void TowingSystem::Render(const Camera3D& camera, AsteroidSystem* asteroidSystem
             sprintf(infoText, "[E] Grab - %s: +%.0f",
                 mineralNames[ast->mineralType], resourceValue);
 
-            RenderInteractionPrompt(ast->position, infoText, camera);
+            //RenderInteractionPrompt(ast->position, infoText, camera);
         }
     }
 
@@ -274,10 +290,10 @@ void TowingSystem::Render(const Camera3D& camera, AsteroidSystem* asteroidSystem
     if (highlightedPlanetIndex >= 0 && planetSystem) {
         const Planet* planet = &planetSystem->GetPlanets()[highlightedPlanetIndex];
         if (planet->active) {
-            RenderHighlight(planet->position, planet->size * 1.2f, camera, 0.7f, 0.7f, 0.7f);
+            //RenderHighlight(planet->position, planet->size * 1.2f, camera, 0.7f, 0.7f, 0.7f);
 
             // Show interaction prompt
-            RenderInteractionPrompt(planet->position + Vec3(0.0f, planet->size, 0.0f), "[E] Deposit", camera);
+            //RenderInteractionPrompt(planet->position + Vec3(0.0f, planet->size, 0.0f), "[E] Deposit", camera);
         }
     }
 }

@@ -94,6 +94,7 @@ void AsteroidSystem::UnloadDistantSectors(const Vec3& playerPos) {
 
             if (a.sectorX == key.x && a.sectorY == key.y) {
                 a.active = false;
+                a.claimedByAIShip = -1;
             }
         }
         loadedSectors.erase(key);
@@ -172,33 +173,27 @@ void AsteroidSystem::GenerateSectorAsteroids(int sectorX, int sectorY) {
 
         // Mineral distribution
         int typeRoll = rand() % 100;
+
+        float brightness = 0.15f + (a.resourceAmount / 100.0f) * 0.35f;  // 0.15→0.5 (dim!)
         if (typeRoll < 25) {
             a.mineralType = MINERAL_IRON;
             float brightness = 0.4f + (rand() % 1000) / 1000.0f * 0.4f;
-            a.r = brightness;
-            a.g = brightness * 0.2f;
-            a.b = brightness * 0.2f;
+            a.r = brightness; a.g = 0.1f; a.b = 0.1f;
         }
         else if (typeRoll < 50) {
             a.mineralType = MINERAL_WATER;
             float brightness = 0.4f + (rand() % 1000) / 1000.0f * 0.4f;
-            a.r = brightness * 0.2f;
-            a.g = brightness * 0.5f;
-            a.b = brightness;
+            a.r = 0.1f; a.g = 0.3f * brightness; a.b = 0.5f * brightness;
         }
         else if (typeRoll < 75) {
             a.mineralType = MINERAL_CARBON;
             float brightness = 0.4f + (rand() % 1000) / 1000.0f * 0.4f;
-            a.r = brightness * 0.2f;
-            a.g = brightness;
-            a.b = brightness * 0.3f;
+            a.r = 0.1f * brightness; a.g = 0.4f * brightness; a.b = 0.1f;
         }
         else {
             a.mineralType = MINERAL_ENERGY;
             float brightness = 0.4f + (rand() % 1000) / 1000.0f * 0.3f;
-            a.r = brightness;
-            a.g = brightness;
-            a.b = brightness * 0.3f;
+            a.r = 0.5f * brightness; a.g = 0.5f * brightness; a.b = 0.1f;
         }
 
         // Resource amount scales with size
