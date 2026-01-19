@@ -1,6 +1,7 @@
 //------------------------------------------------------------------------
-// Asteroid.h - AI-driven asteroid types
+// Asteroid.h - Stationary / physics-driven asteroid field
 //------------------------------------------------------------------------
+
 #ifndef ASTEROID_H
 #define ASTEROID_H
 
@@ -8,30 +9,39 @@
 #include "../Rendering/Camera3D.h"
 #include "../Rendering/Renderer3D.h"
 #include "../Rendering/Mesh3D.h"
-#include <vector>
-#include <map>
 
-// NEW: Asteroid types
-enum AsteroidType {
-    WANDERER,   // Passive drifters (gray)
-    ORBITER,    // Orbit large asteroids (blue-gray)
-    FLOCKING    // Travel in groups (green-gray)
+#include <map>
+#include <vector>
+
+class PlanetSystem;
+
+// Minerals carried by asteroids
+enum AsteroidMineralType {
+    MINERAL_IRON,   // Red
+    MINERAL_WATER,  // Blue
+    MINERAL_CARBON, // Green
+    MINERAL_ENERGY  // Yellow
 };
 
+// Single asteroid instance
 struct Asteroid {
+    // World transform
     Vec3 position;
     Vec3 velocity;
-    float size;
+
+    float size;            // radius
     float mass;
-    float rotationSpeed;
+
+    float rotationSpeed;   // degrees per second
     float currentRotation;
+
     bool active;
 
-    // Fragmentation
-    bool isFragment;
-    float lifetime;
+    // Fragmentation (optional)
+    bool  isFragment;
+    float lifetime;        // remaining lifetime for timed fragments
     float maxLifetime;
-    float alpha;
+    float alpha;           // 0-1 for fade-out
 
     // Color
     float r, g, b;
@@ -39,32 +49,19 @@ struct Asteroid {
     // Sector tracking
     int sectorX;
     int sectorY;
-    bool isPersistent;
+    bool isPersistent;     // survives sector unloads (e.g. fragments if desired)
 
-    // AI properties
-    AsteroidType type;
+    // Resource data
+    AsteroidMineralType mineralType;
+    float resourceAmount;  // 0.0 to 100.0
 
-    // Orbiter AI
-    int orbitTargetIndex;       // CHANGED: Now indexes into PlanetSystem, not asteroids
-    bool orbitingPlanet;        // NEW: True if orbiting planet, false if orbiting asteroid
-    float orbitAngle;
-    float orbitRadius;
-    float orbitSpeed;
-    bool orbitClockwise;
-
-    // Flocking AI
-    Vec3 flockingForce;
-
-    // NEW: Wanderer patrol AI
-    Vec3 patrolTarget;      // Destination position
-    float patrolWaitTimer;  // Time to wait at destination
-    float patrolWaitTime;   // How long to wait (random)
-    bool patrolWaiting;     // Currently waiting?
+    // Towing state
+    bool isTowed;
 };
 
+// Sector key for map
 struct SectorKey {
     int x, y;
-
     bool operator<(const SectorKey& other) const {
         if (x != other.x) return x < other.x;
         return y < other.y;
@@ -73,81 +70,82 @@ struct SectorKey {
 
 class AsteroidSystem {
 private:
-    static const int MAX_ASTEROIDS = 500;
-    static const int GRID_SIZE = 10;
-    static const int ASTEROIDS_PER_SECTOR = 20;
+    static const int MAX_ASTEROIDS = 5000;
+    static const int ASTEROIDS_PER_SECTOR = 30;
     static const int SECTOR_SIZE = 100;
 
     Asteroid asteroids[MAX_ASTEROIDS];
-    Mesh3D asteroidMesh;
+    Mesh3D   asteroidMesh;
 
+    PlanetSystem* planetSystemRef;
+
+    // Sector management
     std::map<SectorKey, bool> loadedSectors;
+    Vec3 lastPlayerPos;
 
-    // Spawn settings
+    // Spatial grid for collisions (simple 2D grid in worldspace)
+    static const int GRID_SIZE = 10;
+    float            cellSize;
+    std::vector<int> spatialGrid[GRID_SIZE][GRID_SIZE];
+
+    // Fragment tracking (optional, kept for effects)
+    struct FragmentInfo {
+        Vec3 position;
+        AsteroidMineralType mineralType;
+        float lifetime;
+        bool  collected;
+    };
+    static const int MAX_TRACKED_FRAGMENTS = 200;
+    FragmentInfo trackedFragments[MAX_TRACKED_FRAGMENTS];
+    int          nextFragmentSlot;
+
+    // Spawn / culling distances
     float spawnDistance;
     float cullDistance;
 
-    // Asteroid properties
-    float minSize;
-    float maxSize;
-    float minSpeed;
-    float maxSpeed;
-
-    // Physics
-    float restitution;
-
-    // Fragmentation
-    float fragmentMinSize;
-    int fragmentCount;
-    float fragmentSpeed;
-
-    // Spatial partitioning
-    float cellSize;
-    std::vector<int> spatialGrid[10][10];
-
     // Helper functions
-    void UpdateSpatialGrid();
-    void GetGridCell(const Vec3& pos, int& cellX, int& cellY);
-    void GetNearbyAsteroids(int cellX, int cellY, std::vector<int>& nearby);
-
-    Vec3 lastPlayerPos;
-
-    // Sector management
-    void GetSectorCoords(const Vec3& pos, int& sectorX, int& sectorY);
+    int  FindFreeSlot();
     void LoadSectorsAroundPlayer(const Vec3& playerPos);
     void UnloadDistantSectors(const Vec3& playerPos);
     void GenerateSectorAsteroids(int sectorX, int sectorY);
 
-    // AI functions
-    void UpdateWandererAI(int index, float deltaTime);
-    void UpdateOrbiterAI(int index, float deltaTime, class PlanetSystem* planetSystem);
-    void UpdateFlockingAI(int index, float deltaTime);
+    // Spatial partitioning
+    void UpdateSpatialGrid();
+    void ClearSpatialGrid();
+    void GetGridCell(const Vec3& pos, int& cellX, int& cellY);
+    void GetNearbyAsteroids(int cellX, int cellY, std::vector<int>& nearby);
 
-    void FindOrbitTarget(int index, class PlanetSystem* planetSystem);
+    // Physics / collision
+    void ResolveAsteroidCollisions(const Vec3& playerPos);
+    void ResolveCollision(int index1, int index2);
 
-    int FindNearestPlanet(const Vec3& pos, float maxDistance, class PlanetSystem* planetSystem);
-    void GetFlockingNeighbors(int index, std::vector<int>& neighbors, float radius);
+    // Fragments
+    void BreakAsteroidIntoFragments(int index, const Vec3& impactPoint, const Vec3& impactVel);
+    void UpdateFragment(int index, float deltaTime);
+    void UpdateFragmentTracking(float deltaTime);
 
 public:
     AsteroidSystem();
 
     void Init();
-    void Update(float deltaTime, const Vec3& playerPos, class PlanetSystem* planetSystem);
+    void Update(float deltaTime, const Vec3& playerPos, PlanetSystem* planetSystem);
     void Render(const Camera3D& camera);
 
-    int GetActiveAsteroidCount() const;
-    int CheckBulletCollision(const Vec3& bulletPos, const Vec3& bulletVel, float bulletRadius);
-    Vec3 CheckPlayerCollision(const Vec3& playerPos, float playerRadius, const Vec3& playerVel);
-    void DestroyAsteroid(int index);
-    void Clear();
+    void SetPlanetSystem(PlanetSystem* planetSys) { planetSystemRef = planetSys; }
+
+    void GetSectorCoords(const Vec3& pos, int& sectorX, int& sectorY);
+
+    int  GetActiveAsteroidCount() const;
+    int  GetMaxAsteroids() const { return MAX_ASTEROIDS; }
+
+    // Collision queries
+    Vec3  CheckPlayerCollision(const Vec3& playerPos, float playerRadius, const Vec3& playerVel);
+
+    void  DestroyAsteroid(int index);
+    void  Clear();
 
     Asteroid* GetAsteroids() { return asteroids; }
-    int GetMaxAsteroids() const { return MAX_ASTEROIDS; }
-
-private:
-    void ResolveCollision(int index1, int index2);
-    void BreakAsteroidIntoFragments(int index, const Vec3& impactPoint, const Vec3& impactVel);
-    void UpdateFragment(int index, float deltaTime);
+    const Asteroid* GetAsteroids() const { return asteroids; }
 };
 
 #endif // ASTEROID_H

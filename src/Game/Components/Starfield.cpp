@@ -16,8 +16,6 @@ StarField::StarField()
 }
 
 void StarField::Init(const Vec3& initialPos) {
-    Logger::LogInfo("StarField: Initializing...");
-
     // Create star mesh
     starMesh = Mesh3D::CreateSphere(1.0f, 4);
 
@@ -25,8 +23,6 @@ void StarField::Init(const Vec3& initialPos) {
     SpawnStarsAroundPlayer(initialPos, maxStars);
 
     lastPlayerPos = initialPos;
-
-    Logger::LogFormat("StarField initialized with %d stars", GetActiveStarCount());
 }
 
 float StarField::GetRandomFloat(float min, float max) {
@@ -145,13 +141,5 @@ void StarField::Render(const Camera3D& camera) {
             true
         );
         rendered++;
-    }
-
-    // Minimal logging
-    static int frameCount = 0;
-    if (++frameCount % 300 == 0) {  // Every 5 seconds
-        Logger::LogFormat("Stars: %d rendered, %d culled (%.1f%%)",
-            rendered, culled,
-            (culled * 100.0f) / (rendered + culled));
     }
 }

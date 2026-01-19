@@ -1,46 +1,52 @@
 ﻿//------------------------------------------------------------------------
-// Asteroid.cpp - AI-driven asteroid types
+// Asteroid.cpp - Stationary / physics-driven asteroid field
 //------------------------------------------------------------------------
+
 #include "Asteroid.h"
 #include "../Utilities/Logger.h"
+#include "../Components/Planet.h"
+
 #include <cstdlib>
 #include <cmath>
-#include <cstdio>
-#include "Planet.h"
 
 AsteroidSystem::AsteroidSystem()
-    : spawnDistance(100.0f)
-    , cullDistance(150.0f)
-    , minSize(0.5f)
-    , maxSize(2.0f)
-    , minSpeed(0.5f)
-    , maxSpeed(2.0f)
-    , restitution(0.7f)
-    , fragmentMinSize(0.6f)
-    , fragmentCount(4)
-    , fragmentSpeed(8.0f)
-    , cellSize(10.0f)
+    : planetSystemRef(nullptr)
+    , nextFragmentSlot(0)
+    , spawnDistance(200.0f)
+    , cullDistance(260.0f)
+    , cellSize(40.0f)
     , lastPlayerPos(0, 0, 0)
 {
     for (int i = 0; i < MAX_ASTEROIDS; i++) {
         asteroids[i].active = false;
-        asteroids[i].isFragment = false;
-        asteroids[i].isPersistent = false;
-        asteroids[i].type = WANDERER;
-        asteroids[i].orbitTargetIndex = -1;
+    }
+
+    for (int x = 0; x < GRID_SIZE; x++) {
+        for (int y = 0; y < GRID_SIZE; y++) {
+            spatialGrid[x][y].clear();
+        }
+    }
+
+    for (int i = 0; i < MAX_TRACKED_FRAGMENTS; i++) {
+        trackedFragments[i].lifetime = 0.0f;
+        trackedFragments[i].collected = false;
     }
 }
 
 void AsteroidSystem::Init() {
-    asteroidMesh = Mesh3D::CreateSphere(1.0f, 5);
+    asteroidMesh = Mesh3D::CreateRock(1.0f, 1);
+    Logger::LogInfo("AsteroidSystem: Initialized (physics-only)");
 
-    Logger::LogInfo("AsteroidSystem: AI-driven types initialized");
-
-    // Load initial sectors
+    // Load initial sectors around origin
     LoadSectorsAroundPlayer(Vec3(0, 0, 0));
     lastPlayerPos = Vec3(0, 0, 0);
+}
 
-    Logger::LogFormat("Initial asteroids: %d", GetActiveAsteroidCount());
+int AsteroidSystem::FindFreeSlot() {
+    for (int i = 0; i < MAX_ASTEROIDS; i++) {
+        if (!asteroids[i].active) return i;
+    }
+    return -1;
 }
 
 void AsteroidSystem::GetSectorCoords(const Vec3& pos, int& sectorX, int& sectorY) {
@@ -51,23 +57,46 @@ void AsteroidSystem::GetSectorCoords(const Vec3& pos, int& sectorX, int& sectorY
 void AsteroidSystem::LoadSectorsAroundPlayer(const Vec3& playerPos) {
     int playerSectorX, playerSectorY;
     GetSectorCoords(playerPos, playerSectorX, playerSectorY);
-
-    // Load 3x3 grid of sectors around player
-    for (int dx = -1; dx <= 1; dx++) {
-        for (int dy = -1; dy <= 1; dy++) {
-            int sectorX = playerSectorX + dx;
-            int sectorY = playerSectorY + dy;
-
-            SectorKey key = { sectorX, sectorY };
-
-            // Check if already loaded
+    for (int dx = -2; dx <= 2; ++dx) {  // Changed from -1 to 1  
+        for (int dy = -2; dy <= 2; ++dy) {
+            int sx = playerSectorX + dx;
+            int sy = playerSectorY + dy;
+            SectorKey key{ sx, sy };
             if (loadedSectors.find(key) == loadedSectors.end()) {
-                GenerateSectorAsteroids(sectorX, sectorY);
+                GenerateSectorAsteroids(sx, sy);
                 loadedSectors[key] = true;
-
-                Logger::LogFormat("Loaded sector (%d, %d)", sectorX, sectorY);
             }
         }
+    }
+}
+
+void AsteroidSystem::UnloadDistantSectors(const Vec3& playerPos) {
+    int playerSectorX, playerSectorY;
+    GetSectorCoords(playerPos, playerSectorX, playerSectorY);
+
+    std::vector<SectorKey> toUnload;
+
+    for (auto& pair : loadedSectors) {
+        int dx = pair.first.x - playerSectorX;
+        int dy = pair.first.y - playerSectorY;
+
+        if (std::abs(dx) > 2 || std::abs(dy) > 2) {
+            toUnload.push_back(pair.first);
+        }
+    }
+
+    for (const auto& key : toUnload) {
+        // deactivate asteroids in those sectors (unless persistent or towed)
+        for (int i = 0; i < MAX_ASTEROIDS; i++) {
+            Asteroid& a = asteroids[i];
+            if (!a.active) continue;
+            if (a.isPersistent || a.isTowed) continue;
+
+            if (a.sectorX == key.x && a.sectorY == key.y) {
+                a.active = false;
+            }
+        }
+        loadedSectors.erase(key);
     }
 }
 
@@ -76,267 +105,135 @@ void AsteroidSystem::GenerateSectorAsteroids(int sectorX, int sectorY) {
     unsigned int oldSeed = rand();
     srand(seed);
 
+    int count = ASTEROIDS_PER_SECTOR;
+
     float centerX = (sectorX + 0.5f) * SECTOR_SIZE;
     float centerY = (sectorY + 0.5f) * SECTOR_SIZE;
 
-    for (int i = 0; i < ASTEROIDS_PER_SECTOR; i++) {
-        int slot = -1;
-        for (int j = 0; j < MAX_ASTEROIDS; j++) {
-            if (!asteroids[j].active) {
-                slot = j;
+    for (int n = 0; n < count; n++) {
+        int slot = FindFreeSlot();
+        if (slot == -1) {
+            Logger::LogWarning("AsteroidSystem: No free asteroid slots!");
+            break;
+        }
+
+        Asteroid& a = asteroids[slot];
+
+        a.active = true;
+        a.isFragment = false;
+        a.isPersistent = true;
+        a.isTowed = false;
+
+        a.sectorX = sectorX;
+        a.sectorY = sectorY;
+
+        // Random position within the sector
+        float offsetX = ((rand() % 1000) / 1000.0f - 0.5f) * (SECTOR_SIZE - 10.0f);
+        float offsetY = ((rand() % 1000) / 1000.0f - 0.5f) * (SECTOR_SIZE - 10.0f);
+        float offsetZ = 0.0f;
+
+        a.position.x = centerX + offsetX;
+        a.position.y = centerY + offsetY;
+        a.position.z = offsetZ;
+
+        // In GenerateSectorAsteroids, after setting a.position
+        bool tooCloseToPlanet = false;
+        for (int p = 0; p < planetSystemRef->GetMaxPlanets(); p++) {
+            const Planet* planet = &planetSystemRef->GetPlanets()[p];
+            if (!planet->active) continue;
+
+            float dx = a.position.x - planet->position.x;
+            float dy = a.position.y - planet->position.y;
+            float distSq = dx * dx + dy * dy;
+
+            float safeDist = planet->size + 15.0f; // 15 units clear zone
+            if (distSq < safeDist * safeDist) {
+                tooCloseToPlanet = true;
                 break;
             }
         }
 
-        if (slot == -1) break;
-
-        // Position
-        float offsetX = ((rand() % 1000) / 1000.0f - 0.5f) * SECTOR_SIZE * 0.8f;
-        float offsetY = ((rand() % 1000) / 1000.0f - 0.5f) * SECTOR_SIZE * 0.8f;
-
-        asteroids[slot].position.x = centerX + offsetX;
-        asteroids[slot].position.y = centerY + offsetY;
-        asteroids[slot].position.z = 0.0f;
-
-        // Initial velocity
-        asteroids[slot].velocity.x = ((rand() % 1000) / 1000.0f - 0.5f) * maxSpeed * 0.5f;
-        asteroids[slot].velocity.y = ((rand() % 1000) / 1000.0f - 0.5f) * maxSpeed * 0.5f;
-        asteroids[slot].velocity.z = 0.0f;
-
-        // Size and mass
-        asteroids[slot].size = minSize + (rand() % 1000) / 1000.0f * (maxSize - minSize);
-        asteroids[slot].mass = asteroids[slot].size * asteroids[slot].size * asteroids[slot].size * 50.0f;
-
-        // Rotation
-        asteroids[slot].rotationSpeed = -50.0f + (rand() % 1000) / 1000.0f * 100.0f;
-        asteroids[slot].currentRotation = (rand() % 360);
-
-        // Assign type with colors
-        float typeRoll = (rand() % 1000) / 1000.0f;
-        if (typeRoll < 0.50f) {
-            // WANDERER - GRAY/WHITE
-            asteroids[slot].type = WANDERER;
-            float brightness = 0.5f + (rand() % 1000) / 1000.0f * 0.4f;
-            asteroids[slot].r = brightness;
-            asteroids[slot].g = brightness;
-            asteroids[slot].b = brightness;
-
-            // NEW: Initialize patrol behavior
-            float targetOffsetX = ((rand() % 1000) / 1000.0f - 0.5f) * SECTOR_SIZE * 0.7f;
-            float targetOffsetY = ((rand() % 1000) / 1000.0f - 0.5f) * SECTOR_SIZE * 0.7f;
-            asteroids[slot].patrolTarget.x = centerX + targetOffsetX;
-            asteroids[slot].patrolTarget.y = centerY + targetOffsetY;
-            asteroids[slot].patrolTarget.z = 0.0f;
-
-            asteroids[slot].patrolWaitTime = 2.0f + (rand() % 1000) / 1000.0f * 6.0f;
-            asteroids[slot].patrolWaitTimer = 0.0f;
-            asteroids[slot].patrolWaiting = false;
-
+        if (tooCloseToPlanet) {
+            // Skip this spawn position, try again or reduce count
+            continue;
         }
-        else if (typeRoll < 0.80f) {
-            // ORBITER - BRIGHT BLUE
-            asteroids[slot].type = ORBITER;
-            asteroids[slot].r = 0.2f + (rand() % 1000) / 1000.0f * 0.2f;
-            asteroids[slot].g = 0.4f + (rand() % 1000) / 1000.0f * 0.3f;
-            asteroids[slot].b = 0.7f + (rand() % 1000) / 1000.0f * 0.3f;
 
-            asteroids[slot].orbitTargetIndex = -1;
-            asteroids[slot].orbitingPlanet = false;
-            asteroids[slot].orbitAngle = (rand() % 1000) / 1000.0f * 6.28318f;
-            asteroids[slot].orbitRadius = 5.0f + (rand() % 1000) / 1000.0f * 5.0f;
-            asteroids[slot].orbitSpeed = 0.05f + (rand() % 1000) / 1000.0f * 0.20f;
-            asteroids[slot].orbitClockwise = (rand() % 2) == 0;
+        // Small initial drift
+        a.velocity.x = ((rand() % 1000) / 1000.0f - 0.5f) * 0.5f;
+        a.velocity.y = ((rand() % 1000) / 1000.0f - 0.5f) * 0.5f;
+		a.velocity.z = 0.0f;
 
+        a.size = 0.6f + ((rand() % 1000) / 1000.0f) * 1.0f; // ~0.6 to 1.6
+        a.mass = a.size * a.size;
+
+        a.rotationSpeed = ((rand() % 1000) / 1000.0f - 0.5f) * 40.0f;
+        a.currentRotation = (rand() % 360);
+        a.alpha = 1.0f;
+
+        // Mineral distribution
+        int typeRoll = rand() % 100;
+        if (typeRoll < 25) {
+            a.mineralType = MINERAL_IRON;
+            float brightness = 0.4f + (rand() % 1000) / 1000.0f * 0.4f;
+            a.r = brightness;
+            a.g = brightness * 0.2f;
+            a.b = brightness * 0.2f;
+        }
+        else if (typeRoll < 50) {
+            a.mineralType = MINERAL_WATER;
+            float brightness = 0.4f + (rand() % 1000) / 1000.0f * 0.4f;
+            a.r = brightness * 0.2f;
+            a.g = brightness * 0.5f;
+            a.b = brightness;
+        }
+        else if (typeRoll < 75) {
+            a.mineralType = MINERAL_CARBON;
+            float brightness = 0.4f + (rand() % 1000) / 1000.0f * 0.4f;
+            a.r = brightness * 0.2f;
+            a.g = brightness;
+            a.b = brightness * 0.3f;
         }
         else {
-            // FLOCKING - BRIGHT GREEN
-            asteroids[slot].type = FLOCKING;
-            asteroids[slot].r = 0.2f + (rand() % 1000) / 1000.0f * 0.2f;
-            asteroids[slot].g = 0.7f + (rand() % 1000) / 1000.0f * 0.3f;
-            asteroids[slot].b = 0.2f + (rand() % 1000) / 1000.0f * 0.2f;
-
-            asteroids[slot].flockingForce = Vec3(0, 0, 0);
+            a.mineralType = MINERAL_ENERGY;
+            float brightness = 0.4f + (rand() % 1000) / 1000.0f * 0.3f;
+            a.r = brightness;
+            a.g = brightness;
+            a.b = brightness * 0.3f;
         }
 
-        // Common properties
-        asteroids[slot].isFragment = false;
-        asteroids[slot].isPersistent = true;
-        asteroids[slot].sectorX = sectorX;
-        asteroids[slot].sectorY = sectorY;
-        asteroids[slot].lifetime = 0.0f;
-        asteroids[slot].maxLifetime = 0.0f;
-        asteroids[slot].alpha = 1.0f;
-        asteroids[slot].active = true;
+        // Resource amount scales with size
+        a.resourceAmount = 20.0f + a.size * 20.0f;
+
+        a.lifetime = 0.0f;
+        a.maxLifetime = 0.0f;
     }
 
     srand(oldSeed);
 }
 
-void AsteroidSystem::UnloadDistantSectors(const Vec3& playerPos) {
-    int playerSectorX, playerSectorY;
-    GetSectorCoords(playerPos, playerSectorX, playerSectorY);
-
-    // Unload sectors that are too far (more than 2 sectors away)
-    std::vector<SectorKey> toUnload;
-
-    for (auto& pair : loadedSectors) {
-        int dx = pair.first.x - playerSectorX;
-        int dy = pair.first.y - playerSectorY;
-
-        if (abs(dx) > 2 || abs(dy) > 2) {
-            toUnload.push_back(pair.first);
-        }
-    }
-
-    // Remove asteroids from unloaded sectors
-    for (const auto& key : toUnload) {
-        for (int i = 0; i < MAX_ASTEROIDS; i++) {
-            if (asteroids[i].active &&
-                asteroids[i].isPersistent &&
-                asteroids[i].sectorX == key.x &&
-                asteroids[i].sectorY == key.y) {
-                asteroids[i].active = false;
-            }
-        }
-
-        loadedSectors.erase(key);
-        Logger::LogFormat("Unloaded sector (%d, %d)", key.x, key.y);
-    }
-}
-
-void AsteroidSystem::Update(float deltaTime, const Vec3& playerPos, PlanetSystem* planetSystem) {
-    float dt = deltaTime / 1000.0f;
-
-    // Sector management
-    float dx = playerPos.x - lastPlayerPos.x;
-    float dy = playerPos.y - lastPlayerPos.y;
-    float movedDist = sqrtf(dx * dx + dy * dy);
-
-    if (movedDist > 20.0f) {
-        LoadSectorsAroundPlayer(playerPos);
-        UnloadDistantSectors(playerPos);
-        lastPlayerPos = playerPos;
-    }
-
-    // Update all active asteroids
-    for (int i = 0; i < MAX_ASTEROIDS; i++) {
-        if (!asteroids[i].active) continue;
-
-        if (asteroids[i].isFragment) {
-            UpdateFragment(i, dt);
-            continue;
-        }
-
-        // AI behavior
-        switch (asteroids[i].type) {
-        case WANDERER:
-            UpdateWandererAI(i, dt);
-            break;
-        case ORBITER:
-            UpdateOrbiterAI(i, dt, planetSystem);  // CHANGED: Pass planetSystem
-            break;
-        case FLOCKING:
-            UpdateFlockingAI(i, dt);
-            break;
-        }
-
-        // Update position
-        asteroids[i].position.x += asteroids[i].velocity.x * dt;
-        asteroids[i].position.y += asteroids[i].velocity.y * dt;
-        asteroids[i].position.z += asteroids[i].velocity.z * dt;
-
-        // Update rotation
-        asteroids[i].currentRotation += asteroids[i].rotationSpeed * dt;
-        if (asteroids[i].currentRotation > 360.0f) {
-            asteroids[i].currentRotation -= 360.0f;
-        }
-
-        // Drag
-        if (asteroids[i].type == FLOCKING) {
-            asteroids[i].velocity.x *= 0.98f;
-            asteroids[i].velocity.y *= 0.98f;
-            asteroids[i].velocity.z *= 0.98f;
-        }
-        else {
-            asteroids[i].velocity.x *= 0.95f;
-            asteroids[i].velocity.y *= 0.95f;
-            asteroids[i].velocity.z *= 0.95f;
-        }
-    }
-
-    // Collision detection (existing code)
-    UpdateSpatialGrid();
-
-    float visibleRangeSq = 80.0f * 80.0f;
-
-    for (int i = 0; i < MAX_ASTEROIDS; i++) {
-        if (!asteroids[i].active || asteroids[i].isFragment) continue;
-
-        float dx = asteroids[i].position.x - playerPos.x;
-        float dy = asteroids[i].position.y - playerPos.y;
-        float distSq = dx * dx + dy * dy;
-
-        if (distSq > visibleRangeSq) continue;
-
-        int cellX, cellY;
-        GetGridCell(asteroids[i].position, cellX, cellY);
-
-        std::vector<int> nearby;
-        GetNearbyAsteroids(cellX, cellY, nearby);
-
-        for (int j : nearby) {
-            if (j <= i) continue;
-            if (!asteroids[j].active || asteroids[j].isFragment) continue;
-
-            float dx = asteroids[j].position.x - asteroids[i].position.x;
-            float dy = asteroids[j].position.y - asteroids[i].position.y;
-            float dz = asteroids[j].position.z - asteroids[i].position.z;
-            float distSq = dx * dx + dy * dy + dz * dz;
-
-            float minDistSq = (asteroids[i].size + asteroids[j].size) *
-                (asteroids[i].size + asteroids[j].size);
-
-            if (distSq < minDistSq && distSq > 0.001f) {
-                ResolveCollision(i, j);
-            }
-        }
-    }
-}
-
-void AsteroidSystem::UpdateFragment(int index, float deltaTime) {
-    Asteroid& frag = asteroids[index];
-    frag.lifetime += deltaTime;
-
-    if (frag.lifetime > frag.maxLifetime - 1.0f) {
-        frag.alpha = (frag.maxLifetime - frag.lifetime) / 1.0f;
-        if (frag.alpha < 0.0f) frag.alpha = 0.0f;
-    }
-
-    if (frag.lifetime >= frag.maxLifetime) {
-        frag.active = false;
-    }
-}
-
-void AsteroidSystem::GetGridCell(const Vec3& pos, int& cellX, int& cellY) {
-    cellX = (int)(pos.x / cellSize) + 50;
-    cellY = (int)(pos.y / cellSize) + 50;
-
-    if (cellX < 0) cellX = 0;
-    if (cellX >= GRID_SIZE) cellX = GRID_SIZE - 1;
-    if (cellY < 0) cellY = 0;
-    if (cellY >= GRID_SIZE) cellY = GRID_SIZE - 1;
-}
-
-void AsteroidSystem::UpdateSpatialGrid() {
+void AsteroidSystem::ClearSpatialGrid() {
     for (int x = 0; x < GRID_SIZE; x++) {
         for (int y = 0; y < GRID_SIZE; y++) {
             spatialGrid[x][y].clear();
         }
     }
+}
+
+void AsteroidSystem::GetGridCell(const Vec3& pos, int& cellX, int& cellY) {
+    cellX = (int)floorf((pos.x + (GRID_SIZE * cellSize * 0.5f)) / cellSize);
+    cellY = (int)floorf((pos.y + (GRID_SIZE * cellSize * 0.5f)) / cellSize);
+
+    if (cellX < 0) cellX = 0;
+    if (cellY < 0) cellY = 0;
+    if (cellX >= GRID_SIZE) cellX = GRID_SIZE - 1;
+    if (cellY >= GRID_SIZE) cellY = GRID_SIZE - 1;
+}
+
+void AsteroidSystem::UpdateSpatialGrid() {
+    ClearSpatialGrid();
 
     for (int i = 0; i < MAX_ASTEROIDS; i++) {
-        if (!asteroids[i].active) continue;
-        if (asteroids[i].isFragment) continue;
+        if (!asteroids[i].active || asteroids[i].isFragment) continue;
 
         int cellX, cellY;
         GetGridCell(asteroids[i].position, cellX, cellY);
@@ -346,270 +243,207 @@ void AsteroidSystem::UpdateSpatialGrid() {
 
 void AsteroidSystem::GetNearbyAsteroids(int cellX, int cellY, std::vector<int>& nearby) {
     nearby.clear();
-
-    for (int dx = -1; dx <= 1; dx++) {
-        for (int dy = -1; dy <= 1; dy++) {
-            int nx = cellX + dx;
-            int ny = cellY + dy;
-
-            if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
-                for (int idx : spatialGrid[nx][ny]) {
-                    nearby.push_back(idx);
-                }
+    for (int x = cellX - 1; x <= cellX + 1; x++) {
+        for (int y = cellY - 1; y <= cellY + 1; y++) {
+            if (x < 0 || y < 0 || x >= GRID_SIZE || y >= GRID_SIZE) continue;
+            for (int idx : spatialGrid[x][y]) {
+                nearby.push_back(idx);
             }
         }
     }
 }
 
 void AsteroidSystem::ResolveCollision(int index1, int index2) {
-    Asteroid& a1 = asteroids[index1];
-    Asteroid& a2 = asteroids[index2];
+    Asteroid& a = asteroids[index1];
+    Asteroid& b = asteroids[index2];
 
-    Vec3 delta;
-    delta.x = a2.position.x - a1.position.x;
-    delta.y = a2.position.y - a1.position.y;
-    delta.z = a2.position.z - a1.position.z;
+    Vec3 delta = b.position - a.position;
+    float distSq = delta.LengthSquared();
+    if (distSq <= 0.0001f) return;
 
-    float distance = sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
-    if (distance < 0.001f) return;
+    float minDist = a.size + b.size;
+    if (distSq >= minDist * minDist) return;
 
-    Vec3 normal;
-    normal.x = delta.x / distance;
-    normal.y = delta.y / distance;
-    normal.z = delta.z / distance;
+    float dist = sqrtf(distSq);
+    Vec3 normal = delta / dist;
 
-    // CHANGED: Softer separation (was instant, now gradual)
-    float overlap = (a1.size + a2.size) - distance;
-    float separationRatio = overlap * 0.3f;  // Only separate 30% per frame
+    float penetration = minDist - dist;
 
-    a1.position.x -= normal.x * separationRatio;
-    a1.position.y -= normal.y * separationRatio;
-    a2.position.x += normal.x * separationRatio;
-    a2.position.y += normal.y * separationRatio;
+    // Separate positions
+    float totalMass = a.mass + b.mass;
+    float moveA = (b.mass / totalMass) * penetration;
+    float moveB = (a.mass / totalMass) * penetration;
 
-    Vec3 relVel;
-    relVel.x = a2.velocity.x - a1.velocity.x;
-    relVel.y = a2.velocity.y - a1.velocity.y;
-    relVel.z = a2.velocity.z - a1.velocity.z;
+    a.position = a.position - normal * moveA;
+    b.position = b.position + normal * moveB;
 
-    float velAlongNormal = relVel.x * normal.x + relVel.y * normal.y + relVel.z * normal.z;
+    // Simple elastic collision
+    float va = a.velocity.Dot(normal);
+    float vb = b.velocity.Dot(normal);
+    float relVel = vb - va;
 
-    if (velAlongNormal > 0) return;
+    if (relVel < 0.0f) {
+        float e = 0.3f; // restitution
+        float j = -(1.0f + e) * relVel / (1.0f / a.mass + 1.0f / b.mass);
 
-    // CHANGED: Softer restitution (was 0.7f, now 0.5f)
-    float totalMass = a1.mass + a2.mass;
-    float impulse = -(1.0f + 0.5f) * velAlongNormal / totalMass;
-
-    Vec3 impulseVec;
-    impulseVec.x = impulse * normal.x;
-    impulseVec.y = impulse * normal.y;
-    impulseVec.z = impulse * normal.z;
-
-    // CHANGED: Dampen impulse application
-    a1.velocity.x -= impulseVec.x * a2.mass * 0.8f;
-    a1.velocity.y -= impulseVec.y * a2.mass * 0.8f;
-    a2.velocity.x += impulseVec.x * a1.mass * 0.8f;
-    a2.velocity.y += impulseVec.y * a1.mass * 0.8f;
-}
-
-void AsteroidSystem::BreakAsteroidIntoFragments(int index, const Vec3& impactPoint, const Vec3& impactVel) {
-    Asteroid& parent = asteroids[index];
-
-    float fragmentSize = parent.size * 0.4f;
-    parent.active = false;
-
-    for (int f = 0; f < fragmentCount; f++) {
-        int slot = -1;
-        for (int i = 0; i < MAX_ASTEROIDS; i++) {
-            if (!asteroids[i].active) {
-                slot = i;
-                break;
-            }
-        }
-
-        if (slot == -1) break;
-
-        float offsetAngle = (f / (float)fragmentCount) * 6.28318f + (rand() % 100) / 500.0f;
-        float offsetDist = parent.size * 0.3f;
-
-        asteroids[slot].position.x = parent.position.x + cosf(offsetAngle) * offsetDist;
-        asteroids[slot].position.y = parent.position.y + sinf(offsetAngle) * offsetDist;
-        asteroids[slot].position.z = parent.position.z;
-
-        asteroids[slot].size = fragmentSize + (rand() % 100) / 500.0f;
-        asteroids[slot].mass = asteroids[slot].size * asteroids[slot].size * asteroids[slot].size * 2.0f;
-
-        Vec3 explosionDir;
-        explosionDir.x = cosf(offsetAngle);
-        explosionDir.y = sinf(offsetAngle);
-        explosionDir.z = 0.0f;
-
-        float explosionMag = fragmentSpeed * (0.8f + (rand() % 100) / 250.0f);
-
-        asteroids[slot].velocity.x = parent.velocity.x + explosionDir.x * explosionMag;
-        asteroids[slot].velocity.y = parent.velocity.y + explosionDir.y * explosionMag;
-        asteroids[slot].velocity.z = 0.0f;
-
-        asteroids[slot].rotationSpeed = -150.0f + (rand() % 1000) / 1000.0f * 300.0f;
-        asteroids[slot].currentRotation = rand() % 360;
-
-        asteroids[slot].lifetime = 0.0f;
-        asteroids[slot].maxLifetime = 2.0f + (rand() % 100) / 100.0f;
-        asteroids[slot].alpha = 1.0f;
-        asteroids[slot].isFragment = true;
-        asteroids[slot].isPersistent = false;  // Fragments are NOT persistent
-
-        float grayValue = 0.3f + (rand() % 100) / 500.0f;
-        asteroids[slot].r = grayValue;
-        asteroids[slot].g = grayValue;
-        asteroids[slot].b = grayValue;
-
-        asteroids[slot].active = true;
+        Vec3 impulse = normal * j;
+        a.velocity = a.velocity - impulse / a.mass;
+        b.velocity = b.velocity + impulse / b.mass;
     }
 }
 
-int AsteroidSystem::CheckBulletCollision(const Vec3& bulletPos, const Vec3& bulletVel, float bulletRadius) {
-    for (int i = 0; i < MAX_ASTEROIDS; i++) {
-        if (!asteroids[i].active) continue;
-        if (asteroids[i].isFragment) continue;
+void AsteroidSystem::ResolveAsteroidCollisions(const Vec3& playerPos) {
+    UpdateSpatialGrid();
 
-        float dx = asteroids[i].position.x - bulletPos.x;
-        float dy = asteroids[i].position.y - bulletPos.y;
-        float dz = asteroids[i].position.z - bulletPos.z;
-        float distSq = dx * dx + dy * dy + dz * dz;
-
-        float collisionRadius = asteroids[i].size + bulletRadius;
-        float collisionRadiusSq = collisionRadius * collisionRadius;
-
-        if (distSq < collisionRadiusSq) {
-            if (asteroids[i].size > fragmentMinSize) {
-                BreakAsteroidIntoFragments(i, bulletPos, bulletVel);
-            }
-            else {
-                asteroids[i].active = false;
-            }
-            return i;
-        }
-    }
-    return -1;
-}
-
-Vec3 AsteroidSystem::CheckPlayerCollision(const Vec3& playerPos, float playerRadius, const Vec3& playerVel) {
-    Vec3 totalKnockback(0, 0, 0);
-    int collisionCount = 0;
+    float visibleRangeSq = 90.0f * 90.0f;
 
     for (int i = 0; i < MAX_ASTEROIDS; i++) {
-        if (!asteroids[i].active) continue;
-        if (asteroids[i].isFragment) continue;
+        Asteroid& a = asteroids[i];
+        if (!a.active || a.isFragment) continue;
 
-        float dx = asteroids[i].position.x - playerPos.x;
-        float dy = asteroids[i].position.y - playerPos.y;
-        float dz = asteroids[i].position.z - playerPos.z;
-        float distSq = dx * dx + dy * dy + dz * dz;
+        float dx = a.position.x - playerPos.x;
+        float dy = a.position.y - playerPos.y;
+        float distSq = dx * dx + dy * dy;
+        if (distSq > visibleRangeSq) continue;
 
-        float collisionDist = asteroids[i].size + playerRadius;
-        float collisionDistSq = collisionDist * collisionDist;
+        int cellX, cellY;
+        GetGridCell(a.position, cellX, cellY);
+        std::vector<int> nearby;
+        GetNearbyAsteroids(cellX, cellY, nearby);
 
-        if (distSq < collisionDistSq && distSq > 0.001f) {
-            float distance = sqrtf(distSq);
-
-            Vec3 normal;
-            normal.x = dx / distance;
-            normal.y = dy / distance;
-            normal.z = dz / distance;
-
-            // Push apart
-            float overlap = collisionDist - distance;
-            asteroids[i].position.x += normal.x * overlap;
-            asteroids[i].position.y += normal.y * overlap;
-            asteroids[i].position.z += normal.z * overlap;
-
-            // Relative velocity
-            Vec3 relVel;
-            relVel.x = asteroids[i].velocity.x - playerVel.x;
-            relVel.y = asteroids[i].velocity.y - playerVel.y;
-            relVel.z = asteroids[i].velocity.z - playerVel.z;
-
-            float velAlongNormal = relVel.x * normal.x + relVel.y * normal.y + relVel.z * normal.z;
-
-            if (velAlongNormal < 0) {
-                // SIMPLE: Just transfer player velocity to asteroid
-                float transferAmount = 0.7f;  // 70% of player velocity
-
-                asteroids[i].velocity.x += playerVel.x * transferAmount;
-                asteroids[i].velocity.y += playerVel.y * transferAmount;
-                asteroids[i].velocity.z += playerVel.z * transferAmount;
-
-                // Small knockback
-                float playerSpeed = sqrtf(playerVel.x * playerVel.x +
-                    playerVel.y * playerVel.y);
-
-                float knockbackMultiplier = 0.4f * (1.0f + asteroids[i].mass * 0.01f);
-
-                totalKnockback.x -= normal.x * knockbackMultiplier;
-                totalKnockback.y -= normal.y * knockbackMultiplier;
-                totalKnockback.z -= normal.z * knockbackMultiplier;
-
-                collisionCount++;
-            }
+        for (int j : nearby) {
+            if (j <= i) continue;
+            if (!asteroids[j].active || asteroids[j].isFragment) continue;
+            ResolveCollision(i, j);
         }
     }
+}
 
-    if (collisionCount > 1) {
-        float dampen = 1.0f / sqrtf((float)collisionCount);
-        totalKnockback.x *= dampen;
-        totalKnockback.y *= dampen;
-        totalKnockback.z *= dampen;
+void AsteroidSystem::Update(float deltaTime,
+    const Vec3& playerPos,
+    PlanetSystem* planetSystem) {
+    float dt = deltaTime / 1000.0f;
+    planetSystemRef = planetSystem;
+
+    // Sector management
+    float dx = playerPos.x - lastPlayerPos.x;
+    float dy = playerPos.y - lastPlayerPos.y;
+    float movedDist = sqrtf(dx * dx + dy * dy);
+
+    if (movedDist > 50.0f) {
+        LoadSectorsAroundPlayer(playerPos);
+        UnloadDistantSectors(playerPos);
+        lastPlayerPos = playerPos;
     }
 
-    return totalKnockback;
+    // Update asteroids (physics only)
+    for (int i = 0; i < MAX_ASTEROIDS; i++) {
+        Asteroid& a = asteroids[i];
+        if (!a.active) continue;
+
+        if (a.isFragment) {
+            UpdateFragment(i, dt);
+            continue;
+        }
+
+        if (a.isTowed) {
+            // Position is controlled by towing system, skip physics
+            continue;
+        }
+
+        // Light drag
+        a.velocity = a.velocity * 0.998f;
+
+        // Integrate motion
+        a.position.x += a.velocity.x * dt;
+        a.position.y += a.velocity.y * dt;
+        a.position.z += a.velocity.z * dt;
+
+        // Rotation
+        a.currentRotation += a.rotationSpeed * dt;
+        if (a.currentRotation > 360.0f) a.currentRotation -= 360.0f;
+        if (a.currentRotation < 0.0f)   a.currentRotation += 360.0f;
+    }
+
+    // Handle asteroid-asteroid collisions
+    ResolveAsteroidCollisions(playerPos);
+
+    // Update fragment tracking (if used for AI hints later)
+    UpdateFragmentTracking(dt);
 }
 
 void AsteroidSystem::Render(const Camera3D& camera) {
     Vec3 camPos = camera.GetPosition();
-    float visibleRangeX = 60.0f;
-    float visibleRangeY = 50.0f;
+
+    float visibleRangeX = 80.0f;
+    float visibleRangeY = 70.0f;
 
     for (int i = 0; i < MAX_ASTEROIDS; i++) {
-        if (!asteroids[i].active) continue;
+        const Asteroid& a = asteroids[i];
+        if (!a.active) continue;
 
-        float dx = asteroids[i].position.x - camPos.x;
-        float dy = asteroids[i].position.y - camPos.y;
+        float dx = a.position.x - camPos.x;
+        float dy = a.position.y - camPos.y;
 
-        if (fabsf(dx) > visibleRangeX || fabsf(dy) > visibleRangeY) {
+        if (fabsf(dx) > visibleRangeX + a.size ||
+            fabsf(dy) > visibleRangeY + a.size) {
             continue;
         }
 
-        Vec3 rotation(0, 0, asteroids[i].currentRotation);
+        Vec3 rotation(0, 0, a.currentRotation);
 
-        float r = asteroids[i].r;
-        float g = asteroids[i].g;
-        float b = asteroids[i].b;
-
-        if (asteroids[i].isFragment) {
-            r *= asteroids[i].alpha;
-            g *= asteroids[i].alpha;
-            b *= asteroids[i].alpha;
-        }
-
-        Renderer3D::DrawMesh(asteroidMesh, asteroids[i].position, rotation,
-            Vec3(asteroids[i].size, asteroids[i].size, asteroids[i].size),
-            camera, r, g, b, false);
+        Renderer3D::DrawMesh(
+            asteroidMesh,
+            a.position,
+            rotation,
+            Vec3(a.size, a.size, a.size),
+            camera,
+            a.r, a.g, a.b,
+            false
+        );
     }
 }
 
 int AsteroidSystem::GetActiveAsteroidCount() const {
     int count = 0;
     for (int i = 0; i < MAX_ASTEROIDS; i++) {
-        if (asteroids[i].active && !asteroids[i].isFragment) count++;
+        if (asteroids[i].active) count++;
     }
     return count;
 }
 
-void AsteroidSystem::DestroyAsteroid(int index) {
-    if (index >= 0 && index < MAX_ASTEROIDS) {
-        asteroids[index].active = false;
+Vec3 AsteroidSystem::CheckPlayerCollision(const Vec3& playerPos,
+    float playerRadius,
+    const Vec3& playerVel) {
+    Vec3 totalPush(0, 0, 0);
+
+    for (int i = 0; i < MAX_ASTEROIDS; i++) {
+        Asteroid& a = asteroids[i];
+        if (!a.active || a.isFragment) continue;
+
+        // FIXED (pushing)
+        float dx = playerPos.x - a.position.x;
+        float dy = playerPos.y - a.position.y;
+        float dz = playerPos.z - a.position.z;
+        float distSq = dx * dx + dy * dy + dz * dz;
+
+        float minDist = playerRadius + a.size;
+        if (distSq < minDist * minDist && distSq > 0.0001f) {
+            float dist = sqrtf(distSq);
+            float overlap = minDist - dist;
+
+            // CORRECT: normal points FROM player TO asteroid = pushes player away
+            Vec3 normal(-dx / dist, -dy / dist, -dz / dist);
+            totalPush = totalPush + normal * overlap;
+        }
     }
+
+    return totalPush;
+}
+
+void AsteroidSystem::DestroyAsteroid(int index) {
+    if (index < 0 || index >= MAX_ASTEROIDS) return;
+    asteroids[index].active = false;
 }
 
 void AsteroidSystem::Clear() {
@@ -619,347 +453,75 @@ void AsteroidSystem::Clear() {
     loadedSectors.clear();
 }
 
-void AsteroidSystem::UpdateWandererAI(int index, float deltaTime) {
-    Asteroid& wanderer = asteroids[index];
+// Fragments – keep simple / minimal; you can reuse your old logic if needed.
 
-    if (wanderer.patrolWaiting) {
-        // Currently waiting at destination
-        wanderer.patrolWaitTimer += deltaTime;
+void AsteroidSystem::BreakAsteroidIntoFragments(int index,
+    const Vec3& impactPoint,
+    const Vec3& impactVel) {
+    Asteroid& src = asteroids[index];
 
-        // Slow down while waiting
-        wanderer.velocity.x *= 0.9f;
-        wanderer.velocity.y *= 0.9f;
-        wanderer.velocity.z *= 0.9f;
+    // Example: create a few small permanent fragments
+    int fragmentCount = 3;
+    for (int i = 0; i < fragmentCount; i++) {
+        int slot = FindFreeSlot();
+        if (slot == -1) break;
 
-        // Check if wait time is over
-        if (wanderer.patrolWaitTimer >= wanderer.patrolWaitTime) {
-            // Pick new random destination within sector
-            float sectorCenterX = (wanderer.sectorX + 0.5f) * SECTOR_SIZE;
-            float sectorCenterY = (wanderer.sectorY + 0.5f) * SECTOR_SIZE;
+        Asteroid& f = asteroids[slot];
+        f.active = true;
+        f.isFragment = true;
+        f.isPersistent = true;
+        f.isTowed = false;
 
-            float targetOffsetX = ((rand() % 1000) / 1000.0f - 0.5f) * SECTOR_SIZE * 0.7f;
-            float targetOffsetY = ((rand() % 1000) / 1000.0f - 0.5f) * SECTOR_SIZE * 0.7f;
+        f.position = impactPoint;
+        float angle = (float)(rand() % 1000) / 1000.0f * 6.28318f;
+        float speed = 4.0f + (float)(rand() % 1000) / 1000.0f * 3.0f;
 
-            wanderer.patrolTarget.x = sectorCenterX + targetOffsetX;
-            wanderer.patrolTarget.y = sectorCenterY + targetOffsetY;
-            wanderer.patrolTarget.z = 0.0f;
+        f.velocity.x = impactVel.x * 0.3f + cosf(angle) * speed;
+        f.velocity.y = impactVel.y * 0.3f + sinf(angle) * speed;
+        f.velocity.z = impactVel.z * 0.3f;
 
-            // New random wait time (2-8 seconds)
-            wanderer.patrolWaitTime = 2.0f + (rand() % 1000) / 1000.0f * 6.0f;
-            wanderer.patrolWaitTimer = 0.0f;
-            wanderer.patrolWaiting = false;
+        f.size = src.size * 0.3f;
+        f.mass = f.size * f.size;
 
-            Logger::LogFormat("Wanderer %d: New patrol target (%.1f, %.1f)",
-                index, wanderer.patrolTarget.x, wanderer.patrolTarget.y);
-        }
+        f.rotationSpeed = src.rotationSpeed * 1.5f;
+        f.currentRotation = src.currentRotation;
+        f.alpha = 1.0f;
+
+        f.mineralType = src.mineralType;
+        f.resourceAmount = src.resourceAmount * 0.3f;
+
+        f.lifetime = 0.0f;
+        f.maxLifetime = 0.0f; // 0 = never expires (or set to >0 to fade out)
+        f.sectorX = src.sectorX;
+        f.sectorY = src.sectorY;
     }
-    else {
-        // Traveling to patrol target
-        float dx = wanderer.patrolTarget.x - wanderer.position.x;
-        float dy = wanderer.patrolTarget.y - wanderer.position.y;
-        float dz = wanderer.patrolTarget.z - wanderer.position.z;
-        float distSq = dx * dx + dy * dy + dz * dz;
-        float dist = sqrtf(distSq);
 
-        // Check if reached target (within 3 units)
-        if (dist < 3.0f) {
-            // Start waiting
-            wanderer.patrolWaiting = true;
-            wanderer.patrolWaitTimer = 0.0f;
-        }
-        else {
-            // Steer toward target
-            if (dist > 0.001f) {
-                Vec3 direction;
-                direction.x = dx / dist;
-                direction.y = dy / dist;
-                direction.z = dz / dist;
-
-                // Apply steering force (gradual acceleration)
-                float steerForce = 1.5f;
-                wanderer.velocity.x += direction.x * steerForce * deltaTime;
-                wanderer.velocity.y += direction.y * steerForce * deltaTime;
-                wanderer.velocity.z += direction.z * steerForce * deltaTime;
-
-                // Limit max speed
-                float speedSq = wanderer.velocity.x * wanderer.velocity.x +
-                    wanderer.velocity.y * wanderer.velocity.y +
-                    wanderer.velocity.z * wanderer.velocity.z;
-                float maxSpeed = 3.0f;
-
-                if (speedSq > maxSpeed * maxSpeed) {
-                    float speed = sqrtf(speedSq);
-                    wanderer.velocity.x = (wanderer.velocity.x / speed) * maxSpeed;
-                    wanderer.velocity.y = (wanderer.velocity.y / speed) * maxSpeed;
-                    wanderer.velocity.z = (wanderer.velocity.z / speed) * maxSpeed;
-                }
-            }
-        }
-    }
+    src.active = false;
 }
 
-void AsteroidSystem::UpdateOrbiterAI(int index, float deltaTime, PlanetSystem* planetSystem) {
-    Asteroid& orbiter = asteroids[index];
+void AsteroidSystem::UpdateFragment(int index, float deltaTime) {
+    Asteroid& f = asteroids[index];
 
-    // Check if has valid target
-    if (orbiter.orbitTargetIndex == -1) {
-        FindOrbitTarget(index, planetSystem);
-    }
-
-    // Verify target still exists
-    if (orbiter.orbitTargetIndex != -1 && planetSystem) {
-        const Planet* planets = planetSystem->GetPlanets();
-        if (!planets[orbiter.orbitTargetIndex].active) {
-            orbiter.orbitTargetIndex = -1;
-            FindOrbitTarget(index, planetSystem);
-        }
-    }
-
-    // If has target, orbit it
-    if (orbiter.orbitTargetIndex != -1 && planetSystem) {
-        const Planet* planets = planetSystem->GetPlanets();
-        const Planet& target = planets[orbiter.orbitTargetIndex];
-
-        // Update orbit angle
-        float direction = orbiter.orbitClockwise ? -1.0f : 1.0f;
-        orbiter.orbitAngle += orbiter.orbitSpeed * direction * deltaTime;
-
-        if (orbiter.orbitAngle > 6.28318f) orbiter.orbitAngle -= 6.28318f;
-        if (orbiter.orbitAngle < 0.0f) orbiter.orbitAngle += 6.28318f;
-
-        // Calculate desired position around planet
-        Vec3 desiredPos;
-        desiredPos.x = target.position.x + cosf(orbiter.orbitAngle) * orbiter.orbitRadius;
-        desiredPos.y = target.position.y + sinf(orbiter.orbitAngle) * orbiter.orbitRadius;
-        desiredPos.z = target.position.z;
-
-        // Steer toward desired position
-        Vec3 toDesired;
-        toDesired.x = desiredPos.x - orbiter.position.x;
-        toDesired.y = desiredPos.y - orbiter.position.y;
-        toDesired.z = desiredPos.z - orbiter.position.z;
-
-        float steerStrength = 2.0f;
-        orbiter.velocity.x += toDesired.x * steerStrength * deltaTime;
-        orbiter.velocity.y += toDesired.y * steerStrength * deltaTime;
-        orbiter.velocity.z += toDesired.z * steerStrength * deltaTime;
-
-        // Planets don't move, so no need to match velocity
-    }
-    else {
-        // No target - drift randomly
-        UpdateWandererAI(index, deltaTime);
-    }
-}
-
-void AsteroidSystem::FindOrbitTarget(int index, PlanetSystem* planetSystem) {
-    if (!planetSystem) {
-        asteroids[index].orbitTargetIndex = -1;
+    // If maxLifetime == 0, fragment is persistent
+    if (f.maxLifetime == 0.0f) {
+        f.velocity = f.velocity * 0.98f;
         return;
     }
 
-    int targetIndex = FindNearestPlanet(asteroids[index].position, 50.0f, planetSystem);
-
-    if (targetIndex != -1) {
-        asteroids[index].orbitTargetIndex = targetIndex;
-        asteroids[index].orbitingPlanet = true;
-
-        // Count other orbiters on this planet
-        int orbitersOnTarget = 0;
-        for (int i = 0; i < MAX_ASTEROIDS; i++) {
-            if (i == index) continue;
-            if (!asteroids[i].active) continue;
-            if (asteroids[i].type != ORBITER) continue;
-            if (asteroids[i].orbitTargetIndex == targetIndex && asteroids[i].orbitingPlanet) {
-                orbitersOnTarget++;
-            }
-        }
-
-        // Assign orbital lane
-        const Planet* planets = planetSystem->GetPlanets();
-        float planetSize = planets[targetIndex].size;
-        float baseRadius = planetSize + 3.0f;  // Start 3 units from surface
-        float laneSpacing = 2.5f;
-
-        asteroids[index].orbitRadius = baseRadius + (orbitersOnTarget * laneSpacing);
-        asteroids[index].orbitAngle = (rand() % 1000) / 1000.0f * 6.28318f;
-
-        Logger::LogFormat("Orbiter %d locked to planet %d (lane %d, radius %.1f)",
-            index, targetIndex, orbitersOnTarget, asteroids[index].orbitRadius);
-    }
-    else {
-        asteroids[index].orbitTargetIndex = -1;
-        asteroids[index].orbitingPlanet = false;
-    }
-}
-
-int AsteroidSystem::FindNearestPlanet(const Vec3& pos, float maxDistance, PlanetSystem* planetSystem) {
-    if (!planetSystem) return -1;
-
-    const Planet* planets = planetSystem->GetPlanets();
-    int maxPlanets = planetSystem->GetMaxPlanets();
-
-    int bestIndex = -1;
-    float bestDistSq = maxDistance * maxDistance;
-
-    for (int i = 0; i < maxPlanets; i++) {
-        if (!planets[i].active) continue;
-
-        float dx = planets[i].position.x - pos.x;
-        float dy = planets[i].position.y - pos.y;
-        float distSq = dx * dx + dy * dy;
-
-        if (distSq < bestDistSq) {
-            bestDistSq = distSq;
-            bestIndex = i;
-        }
-    }
-
-    return bestIndex;
-}
-
-void AsteroidSystem::UpdateFlockingAI(int index, float deltaTime) {
-    Asteroid& flocker = asteroids[index];
-
-    // Find nearby flockers - INCREASED RADIUS
-    std::vector<int> neighbors;
-    GetFlockingNeighbors(index, neighbors, 25.0f);  // Was 15.0f, now 25.0f
-
-    if (neighbors.empty()) {
-        // No neighbors - add slight attraction to nearest flocker
-        int nearest = -1;
-        float nearestDist = 100.0f;
-
-        for (int i = 0; i < MAX_ASTEROIDS; i++) {
-            if (i == index) continue;
-            if (!asteroids[i].active) continue;
-            if (asteroids[i].isFragment) continue;
-            if (asteroids[i].type != FLOCKING) continue;
-
-            float dx = asteroids[i].position.x - flocker.position.x;
-            float dy = asteroids[i].position.y - flocker.position.y;
-            float dist = sqrtf(dx * dx + dy * dy);
-
-            if (dist < nearestDist) {
-                nearestDist = dist;
-                nearest = i;
-            }
-        }
-
-        if (nearest != -1) {
-            // Drift toward nearest flocker
-            float dx = asteroids[nearest].position.x - flocker.position.x;
-            float dy = asteroids[nearest].position.y - flocker.position.y;
-            float dist = sqrtf(dx * dx + dy * dy);
-
-            if (dist > 0.001f) {
-                flocker.velocity.x += (dx / dist) * 0.5f * deltaTime;
-                flocker.velocity.y += (dy / dist) * 0.5f * deltaTime;
-            }
-        }
-        else {
-            // No other flockers at all - drift randomly
-            UpdateWandererAI(index, deltaTime);
-        }
+    f.lifetime += deltaTime;
+    if (f.lifetime > f.maxLifetime) {
+        f.active = false;
         return;
     }
 
-    // Boids algorithm: 3 rules
-    Vec3 separation(0, 0, 0);
-    Vec3 alignment(0, 0, 0);
-    Vec3 cohesion(0, 0, 0);
-
-    int nearCount = 0;
-    int totalCount = (int)neighbors.size();
-
-    for (int neighborIdx : neighbors) {
-        Asteroid& neighbor = asteroids[neighborIdx];
-
-        float dx = neighbor.position.x - flocker.position.x;
-        float dy = neighbor.position.y - flocker.position.y;
-        float dz = neighbor.position.z - flocker.position.z;
-        float distSq = dx * dx + dy * dy + dz * dz;
-        float dist = sqrtf(distSq);
-
-        // Rule 1: Separation (avoid crowding) - INCREASED DISTANCE
-        if (dist < 8.0f && dist > 0.001f) {  // Was 5.0f, now 8.0f
-            separation.x -= dx / dist;
-            separation.y -= dy / dist;
-            separation.z -= dz / dist;
-            nearCount++;
-        }
-
-        // Rule 2: Alignment (match velocity)
-        alignment.x += neighbor.velocity.x;
-        alignment.y += neighbor.velocity.y;
-        alignment.z += neighbor.velocity.z;
-
-        // Rule 3: Cohesion (move toward average position)
-        cohesion.x += neighbor.position.x;
-        cohesion.y += neighbor.position.y;
-        cohesion.z += neighbor.position.z;
-    }
-
-    // Average and apply forces
-    if (nearCount > 0) {
-        separation.x /= nearCount;
-        separation.y /= nearCount;
-        separation.z /= nearCount;
-    }
-
-    if (totalCount > 0) {
-        alignment.x /= totalCount;
-        alignment.y /= totalCount;
-        alignment.z /= totalCount;
-
-        cohesion.x /= totalCount;
-        cohesion.y /= totalCount;
-        cohesion.z /= totalCount;
-
-        cohesion.x -= flocker.position.x;
-        cohesion.y -= flocker.position.y;
-        cohesion.z -= flocker.position.z;
-    }
-
-    // INCREASED WEIGHTS for more visible flocking
-    float separationWeight = 2.0f;   // Was 1.5f
-    float alignmentWeight = 1.2f;    // Was 0.5f
-    float cohesionWeight = 1.5f;     // Was 0.8f
-
-    // Apply forces
-    flocker.velocity.x += separation.x * separationWeight * deltaTime;
-    flocker.velocity.y += separation.y * separationWeight * deltaTime;
-    flocker.velocity.z += separation.z * separationWeight * deltaTime;
-
-    flocker.velocity.x += (alignment.x - flocker.velocity.x) * alignmentWeight * deltaTime;
-    flocker.velocity.y += (alignment.y - flocker.velocity.y) * alignmentWeight * deltaTime;
-    flocker.velocity.z += (alignment.z - flocker.velocity.z) * alignmentWeight * deltaTime;
-
-    flocker.velocity.x += cohesion.x * cohesionWeight * deltaTime;
-    flocker.velocity.y += cohesion.y * cohesionWeight * deltaTime;
-    flocker.velocity.z += cohesion.z * cohesionWeight * deltaTime;
-}
-
-void AsteroidSystem::GetFlockingNeighbors(int index, std::vector<int>& neighbors, float radius) {
-    neighbors.clear();
-
-    Vec3 pos = asteroids[index].position;
-    float radiusSq = radius * radius;
-
-    for (int i = 0; i < MAX_ASTEROIDS; i++) {
-        if (i == index) continue;
-        if (!asteroids[i].active) continue;
-        if (asteroids[i].isFragment) continue;
-        if (asteroids[i].type != FLOCKING) continue;
-
-        float dx = asteroids[i].position.x - pos.x;
-        float dy = asteroids[i].position.y - pos.y;
-        float dz = asteroids[i].position.z - pos.z;
-        float distSq = dx * dx + dy * dy + dz * dz;
-
-        if (distSq < radiusSq) {
-            neighbors.push_back(i);
-        }
+    if (f.lifetime > f.maxLifetime - 1.0f) {
+        float t = (f.maxLifetime - f.lifetime);
+        if (t < 0.0f) t = 0.0f;
+        f.alpha = t / 1.0f;
     }
 }
 
+void AsteroidSystem::UpdateFragmentTracking(float deltaTime) {
+    // Optional: you can keep this empty or reuse your existing logic
+    // if you want other systems (AI, etc.) to react to fragments.
+}

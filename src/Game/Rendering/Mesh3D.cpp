@@ -184,25 +184,6 @@ void Mesh3D::CalculateBounds() {
     center = (boundsMin + boundsMax) * 0.5f;
 }
 
-void Mesh3D::CalculateNormals() {
-    // Calculate face normals
-    for (size_t i = 0; i < vertices.size(); i += 3) {
-        if (i + 2 >= vertices.size()) break;
-
-        Vec3 v0 = vertices[i].position;
-        Vec3 v1 = vertices[i + 1].position;
-        Vec3 v2 = vertices[i + 2].position;
-
-        Vec3 edge1 = v1 - v0;
-        Vec3 edge2 = v2 - v0;
-        Vec3 normal = edge1.Cross(edge2).Normalized();
-
-        vertices[i].normal = normal;
-        vertices[i + 1].normal = normal;
-        vertices[i + 2].normal = normal;
-    }
-}
-
 //-----------------------------------------------------------------------------
 // Primitive Shapes
 //-----------------------------------------------------------------------------
@@ -388,6 +369,37 @@ Mesh3D Mesh3D::CreateCylinder(float radius, float height, int segments) {
     return mesh;
 }
 
+Mesh3D Mesh3D::CreateRock(float radius, int detail) {
+    Mesh3D rock = CreateSphere(radius, 4);  // Higher base detail, NO subdivide
+
+    for (size_t i = 0; i < rock.vertices.size(); i++) {
+        Vertex& v = rock.vertices[i];
+
+        float seed = (float)i * 0.123f;
+        float noise = 0.0f;
+        noise += sinf(v.position.x * 5.0f + seed) * 0.15f;
+        noise += sinf(v.position.y * 6.2f + seed * 1.3f) * 0.10f;
+        noise += sinf(v.position.z * 4.8f + seed * 2.1f) * 0.08f;
+        noise *= 0.3f;
+
+        v.position = v.position + v.normal * noise;
+
+        float len = v.position.Length();
+        if (len > 0.001f) {
+            v.position = v.position * (radius / len);
+        }
+    }
+
+    rock.CalculateNormals();
+
+    for (Vertex& v : rock.vertices) {
+        v.normal = v.normal * -1.0f;
+    }
+
+    rock.CalculateBounds();
+    return rock;
+}
+
 Mesh3D Mesh3D::CreatePlane(float width, float height) {
     Mesh3D mesh;
     float hw = width * 0.5f;
@@ -420,4 +432,125 @@ Mesh3D Mesh3D::CreatePlane(float width, float height) {
 
     mesh.CalculateBounds();
     return mesh;
+}
+
+void Mesh3D::Subdivide(int iterations) {
+    for (int iter = 0; iter < iterations; iter++) {
+        std::vector<Vertex> newVertices;
+        std::vector<Face> newFaces;
+        std::map<std::pair<int, int>, int> midpointCache;
+
+        for (const Face& oldFace : faces) {
+            // Get original vertices
+            Vertex v0 = vertices[oldFace.vertexIndices[0]];
+            Vertex v1 = vertices[oldFace.vertexIndices[1]];
+            Vertex v2 = vertices[oldFace.vertexIndices[2]];
+
+            // Original vertex indices
+            int i0 = GetOrCreateVertex(newVertices, v0);
+            int i1 = GetOrCreateVertex(newVertices, v1);
+            int i2 = GetOrCreateVertex(newVertices, v2);
+
+            // Midpoint indices
+            int m01 = GetMidpoint(newVertices, midpointCache, v0, v1);
+            int m12 = GetMidpoint(newVertices, midpointCache, v1, v2);
+            int m20 = GetMidpoint(newVertices, midpointCache, v2, v0);
+
+            // 4 new faces using your C-array Face constructor
+            Face face0;
+            face0.vertexIndices[0] = i0;
+            face0.vertexIndices[1] = m01;
+            face0.vertexIndices[2] = m20;
+            newFaces.push_back(face0);
+
+            Face face1;
+            face1.vertexIndices[0] = m01;
+            face1.vertexIndices[1] = i1;
+            face1.vertexIndices[2] = m12;
+            newFaces.push_back(face1);
+
+            Face face2;
+            face2.vertexIndices[0] = m12;
+            face2.vertexIndices[1] = i2;
+            face2.vertexIndices[2] = m20;
+            newFaces.push_back(face2);
+
+            Face face3;
+            face3.vertexIndices[0] = m01;
+            face3.vertexIndices[1] = m12;
+            face3.vertexIndices[2] = m20;
+            newFaces.push_back(face3);
+        }
+
+        vertices = std::move(newVertices);
+        faces = std::move(newFaces);
+        CalculateNormals();
+    }
+}
+
+int Mesh3D::GetOrCreateVertex(std::vector<Vertex>& vertexList, const Vertex& v) {
+    // Simple duplicate check (could optimize with hashmap)
+    for (size_t i = 0; i < vertexList.size(); i++) {
+        Vertex& existing = vertexList[i];
+        if ((existing.position - v.position).LengthSquared() < 0.0001f) {
+            return (int)i;
+        }
+    }
+    vertexList.push_back(v);
+    return (int)(vertexList.size() - 1);
+}
+
+int Mesh3D::GetMidpoint(std::vector<Vertex>& vertexList,
+    std::map<std::pair<int, int>, int>& cache,
+    const Vertex& v0, const Vertex& v1) {
+    // Sort indices to make key unique
+    int idx0 = 0, idx1 = 0;
+    if (v0.position.LengthSquared() < v1.position.LengthSquared()) {
+        idx0 = GetOrCreateVertex(vertexList, v0);
+        idx1 = GetOrCreateVertex(vertexList, v1);
+    }
+    else {
+        idx1 = GetOrCreateVertex(vertexList, v0);
+        idx0 = GetOrCreateVertex(vertexList, v1);
+    }
+
+    std::pair<int, int> key = { idx0, idx1 };
+    auto it = cache.find(key);
+    if (it != cache.end()) {
+        return it->second;
+    }
+
+    // Create midpoint
+    Vertex mid;
+    mid.position = (v0.position + v1.position) * 0.5f;
+    mid.normal = (v0.normal + v1.normal).Normalized();
+    mid.texCoord = (v0.texCoord + v1.texCoord) * 0.5f;
+
+    int newIdx = GetOrCreateVertex(vertexList, mid);
+    cache[key] = newIdx;
+    return newIdx;
+}
+
+void Mesh3D::CalculateNormals() {
+    for (Vertex& v : vertices) {
+        v.normal = Vec3(0, 0, 0);
+    }
+
+    for (const Face& f : faces) {
+        Vertex& v0 = vertices[f.vertexIndices[0]];
+        Vertex& v1 = vertices[f.vertexIndices[1]];
+        Vertex& v2 = vertices[f.vertexIndices[2]];
+
+        Vec3 edge1 = v1.position - v0.position;
+        Vec3 edge2 = v2.position - v0.position;
+        Vec3 faceNormal = edge1.Cross(edge2).Normalized();
+
+        v0.normal = v0.normal + faceNormal;
+        v1.normal = v1.normal + faceNormal;
+        v2.normal = v2.normal + faceNormal;
+    }
+
+    for (Vertex& v : vertices) {
+        v.normal = v.normal.Normalized();
+    }
 }

@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <cstdio>
+#include "../Utilities/WorldText3D.h"
 
 PlanetSystem::PlanetSystem()
     : lastPlayerPos(0, 0, 0)
@@ -13,6 +14,126 @@ PlanetSystem::PlanetSystem()
     for (int i = 0; i < MAX_PLANETS; i++) {
         planets[i].active = false;
     }
+}
+
+void PlanetSystem::GeneratePlanetName(int sectorX, int sectorY, char* outName, int maxLength) {
+    // Arrays of name parts for procedural generation
+    const char* prefixes[] = {
+        "Alpha", "Beta", "Gamma", "Delta", "Epsilon",
+        "Zeta", "Theta", "Nova", "Terra", "Xeno",
+        "Kepler", "Proxima", "Vega", "Sirius", "Rigel"
+    };
+
+    const char* suffixes[] = {
+        "Prime", "Secundus", "Minor", "Major", "Centauri",
+        "VII", "IX", "Omega", "Tertius", "Nexus"
+    };
+
+    int numPrefixes = sizeof(prefixes) / sizeof(prefixes[0]);
+    int numSuffixes = sizeof(suffixes) / sizeof(suffixes[0]);
+
+    // Use sector coords as seed for consistent names per sector
+    int seed = sectorX * 73856093 ^ sectorY * 19349663;
+
+    // Select prefix and suffix based on seed
+    int prefixIdx = (seed & 0xFFFF) % numPrefixes;
+    int suffixIdx = ((seed >> 16) & 0xFFFF) % numSuffixes;
+
+    // Generate a number based on coordinates
+    int number = abs(sectorX * 10 + sectorY);
+
+    // Format the name
+    snprintf(outName, maxLength, "%s-%s %d",
+        prefixes[prefixIdx],
+        suffixes[suffixIdx],
+        number);
+}
+
+void PlanetSystem::DrawResourceGauge(const Planet& planet, const Camera3D& camera) {
+    Vec3 camPos = camera.GetPosition();
+
+    // Check distance - only show within 30 units
+    float dx = planet.position.x - camPos.x;
+    float dy = planet.position.y - camPos.y;
+    float distSq = dx * dx + dy * dy;
+
+    if (distSq > 2500.0f) return;  // 50*50 = 2500
+
+    // Define resources with colors and angles (like speedometer positions)
+    struct ResourceInfo {
+        const char* label;
+        float value;
+        float r, g, b;
+        float angle;  // Angle in radians (0 = right, -PI/2 = top, etc.)
+    };
+
+    // Arrange in top-right quadrant (angles from -45° to +45° from top-right)
+    // Think of it like a speedometer arc from 10 o'clock to 2 o'clock
+    ResourceInfo resources[4] = {
+        { "Water",  planet.waterLevel,  0.3f, 0.6f, 1.0f, -0.7854f },   // ~45° up-right (10:30 position)
+        { "Energy", planet.energyLevel, 1.0f, 1.0f, 0.3f, -0.3927f },   // ~22° up-right (11:30 position)
+        { "Carbon", planet.carbonLevel, 0.3f, 1.0f, 0.3f,  0.0f },      // 0° right (12:00 position)
+        { "Iron",   planet.ironLevel,   1.0f, 0.3f, 0.3f,  0.3927f }    // ~22° down-right (1:30 position)
+    };
+
+    // Distance from planet center for text
+    float textRadius = planet.size + 2.0f;  // units beyond planet surface
+
+    for (int i = 0; i < 4; i++) {
+        // Calculate position along circumference
+        Vec3 textPos = planet.position;
+        textPos.x += cosf(resources[i].angle) * textRadius;
+        textPos.y += sinf(resources[i].angle) * textRadius;
+
+        // Format: "Water: 85"
+        char labelBuffer[32];
+        snprintf(labelBuffer, sizeof(labelBuffer), "%s: %.0f",
+            resources[i].label, resources[i].value);
+
+        // Draw label using WorldText3D
+        WorldText3D::Print(textPos, labelBuffer, camera,
+            resources[i].r, resources[i].g, resources[i].b,
+            GLUT_BITMAP_HELVETICA_10);
+
+        // Draw resource bar below the label
+        DrawResourceBar(textPos, resources[i].value, camera,
+            resources[i].r, resources[i].g, resources[i].b);
+    }
+}
+
+void PlanetSystem::DrawResourceBar(const Vec3& worldPos, float value,
+    const Camera3D& camera,
+    float r, float g, float b) {
+    // Bar position slightly below the text
+    Vec3 barPos = worldPos;
+    barPos.y -= 0.6f;  // Closer to text
+
+    // Convert to NDC for screen-space bar drawing
+    Vec4 ndc = camera.WorldToNDC(barPos);
+
+    // Check if on screen
+    if (ndc.w < camera.GetNearPlane()) return;
+    if (ndc.x < -1.5f || ndc.x > 1.5f || ndc.y < -1.5f || ndc.y > 1.5f) return;
+
+    // Convert to screen coordinates
+    float screenX = (ndc.x + 1.0f) * (APP_VIRTUAL_WIDTH * 0.5f);
+    float screenY = (ndc.y + 1.0f) * (APP_VIRTUAL_HEIGHT * 0.5f);
+
+    // Bar dimensions (THINNER)
+    float barWidth = 60.0f;
+    float barHeight = 3.0f;  // CHANGED: Thinner (was 6.0f)
+    float fillWidth = (value / 100.0f) * barWidth;
+
+    // Draw filled portion only (NO BACKGROUND)
+    for (float y = 0; y < barHeight; y++) {
+        App::DrawLine(screenX, screenY + y,
+            screenX + fillWidth, screenY + y,
+            r, g, b);
+    }
+
+    // Draw thin border outline
+    //App::DrawLine(screenX, screenY, screenX + barWidth, screenY, 0.4f, 0.4f, 0.4f);  // Bottom
+    App::DrawLine(screenX, screenY + barHeight, screenX + barWidth, screenY + barHeight, 0.4f, 0.4f, 0.4f);  // Top
 }
 
 void PlanetSystem::Init() {
@@ -26,6 +147,22 @@ void PlanetSystem::Init() {
     lastPlayerPos = Vec3(0, 0, 0);
 
     Logger::LogFormat("Initial planets loaded: %d", GetActivePlanetCount());
+}
+
+void PlanetSystem::WorldToSector(const Vec3& worldPos, int& sectorX, int& sectorY) const {
+    const_cast<PlanetSystem*>(this)->GetSectorCoords(worldPos, sectorX, sectorY);
+}
+
+bool PlanetSystem::HasPlanetInSector(int sectorX, int sectorY) const {
+    // Check if any active planet is in this sector
+    for (int i = 0; i < MAX_PLANETS; i++) {
+        if (planets[i].active &&
+            planets[i].sectorX == sectorX &&
+            planets[i].sectorY == sectorY) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void PlanetSystem::GetSectorCoords(const Vec3& pos, int& sectorX, int& sectorY) {
@@ -104,8 +241,13 @@ void PlanetSystem::GenerateSectorPlanet(int sectorX, int sectorY) {
     planets[slot].sectorY = sectorY;
     planets[slot].active = true;
 
-    Logger::LogFormat("Planet spawned in sector (%d, %d) - size: %.1f",
-        sectorX, sectorY, planets[slot].size);
+    // Initialize random resource levels
+    planets[slot].waterLevel = 30.0f + (rand() % 1000) / 1000.0f * 70.0f;   // 30-100
+    planets[slot].energyLevel = 30.0f + (rand() % 1000) / 1000.0f * 70.0f;  // 30-100
+    planets[slot].carbonLevel = 30.0f + (rand() % 1000) / 1000.0f * 70.0f;  // 30-100
+    planets[slot].ironLevel = 30.0f + (rand() % 1000) / 1000.0f * 70.0f;    // 30-100
+
+    GeneratePlanetName(sectorX, sectorY, planets[slot].name, sizeof(planets[slot].name));
 
     srand(oldSeed);
 }
@@ -132,8 +274,8 @@ void PlanetSystem::UnloadDistantSectors(const Vec3& playerPos) {
             if (planets[i].active &&
                 planets[i].sectorX == key.x &&
                 planets[i].sectorY == key.y) {
+
                 planets[i].active = false;
-                Logger::LogFormat("Planet unloaded from sector (%d, %d)", key.x, key.y);
             }
         }
         loadedSectors.erase(key);
@@ -165,6 +307,14 @@ void PlanetSystem::Update(float deltaTime, const Vec3& playerPos) {
         if (planets[i].currentRotation < 0.0f) {
             planets[i].currentRotation += 360.0f;
         }
+
+        // Slowly regenerate water (0.1 per second)
+        if (planets[i].waterLevel < 100.0f) {
+            planets[i].waterLevel += 0.1f * dt;
+            if (planets[i].waterLevel > 100.0f) {
+                planets[i].waterLevel = 100.0f;
+            }
+        }
     }
 }
 
@@ -195,6 +345,17 @@ void PlanetSystem::Render(const Camera3D& camera) {
         Renderer3D::DrawMesh(planetMesh, planets[i].position, rotation,
             Vec3(planets[i].size, planets[i].size, planets[i].size),
             camera, white, white, white, false);
+
+        float labelOffset = -(planets[i].size + 3.0f);  // Negative = below
+
+        WorldText3D::PrintWithOffset(planets[i].position,
+            labelOffset,
+            planets[i].name,  // Use stored name
+            camera,
+            1.0f, 1.0f, 1.0f,
+            GLUT_BITMAP_HELVETICA_12);
+
+        DrawResourceGauge(planets[i], camera);
     }
 }
 

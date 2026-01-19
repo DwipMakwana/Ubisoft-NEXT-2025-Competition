@@ -21,6 +21,14 @@ struct Planet {
     // Sector tracking
     int sectorX;
     int sectorY;
+
+    char name[64];
+
+    // Resource system
+    float waterLevel;      // 0.0 to 100.0
+    float energyLevel;     // 0.0 to 100.0
+    float carbonLevel;     // 0.0 to 100.0
+    float ironLevel;       // 0.0 to 100.0
 };
 
 struct PlanetSectorKey {
@@ -49,7 +57,14 @@ private:
     void GetSectorCoords(const Vec3& pos, int& sectorX, int& sectorY);
     void LoadSectorsAroundPlayer(const Vec3& playerPos);
     void UnloadDistantSectors(const Vec3& playerPos);
-    void GenerateSectorPlanet(int sectorX, int sectorY);
+    void GenerateSectorPlanet(int sectorX, int sectorY);    
+
+    // Planet name generation
+    void GeneratePlanetName(int sectorX, int sectorY, char* nameBuffer, int bufferSize);
+
+    // Helper to draw resource text around planet
+    void DrawResourceGauge(const Planet& planet, const Camera3D& camera);
+    void DrawResourceBar(const Vec3& worldPos, float value, const Camera3D& camera, float r, float g, float b);
 
 public:
     PlanetSystem();
@@ -68,6 +83,9 @@ public:
     bool CheckPlayerCollision(const Vec3& playerPos, float playerRadius, Vec3& pushDirection);
 
     int GetActivePlanetCount() const;
+
+    bool HasPlanetInSector(int sectorX, int sectorY) const;
+    void WorldToSector(const Vec3& worldPos, int& sectorX, int& sectorY) const;
 };
 
 #endif // PLANET_H

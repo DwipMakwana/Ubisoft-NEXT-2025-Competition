@@ -8,6 +8,7 @@
 #include "../Utilities/MathUtils3D.h"
 #include <vector>
 #include <string>
+#include <map>
 
 struct Vertex {
     Vec3 position;
@@ -55,6 +56,11 @@ public:
     static Mesh3D CreatePlane(float width = 1.0f, float height = 1.0f);
     static Mesh3D CreatePyramid(float baseSize, float height);
     static Mesh3D CreateCylinder(float radius, float height, int segments = 16);
+    static Mesh3D CreateRock(float radius = 1.0f, int detail = 2);
+
+    void Subdivide(int iterations);
+    int GetOrCreateVertex(std::vector<Vertex>& vertexList, const Vertex& v);
+    int GetMidpoint(std::vector<Vertex>& vertexList, std::map<std::pair<int, int>, int>& cache, const Vertex& v0, const Vertex& v1);
 
     // Helpers
     void CalculateBounds();

@@ -7,7 +7,6 @@
 #include "Rendering/Mesh3D.h"
 #include "Utilities/MathUtils3D.h"
 #include "Utilities/Logger.h"
-#include "Components/Bullet.h"
 #include "Components/Player.h"
 #include "Components/Asteroid.h"
 #include "Components/StarField.h"
@@ -15,31 +14,31 @@
 #include <cstdlib>
 #include <ctime>
 #include <Components/Planet.h>
+#include <Utilities/WorldText3D.h>
+#include <Systems/TowingSystem.h>
+#include <UI/UIManager.h>
 
 Camera3D camera3D;
-BulletSystem bulletSystem;
 Player player;
 AsteroidSystem asteroidSystem;
 StarField starField;
 PlanetSystem planetSystem;
-
-float shootCooldown = 0.0f;
-
-void DrawCrosshair() {
-    // ... existing crosshair code ...
-}
+TowingSystem towingSystem;
+UIManager uiManager;
 
 void Init() {
     Logger::LogInfo("=== GAME INITIALIZATION START ===");
 
     srand((unsigned int)time(nullptr));
 
-    bulletSystem.Init();
     player.Init();
-    asteroidSystem.Init();
     planetSystem.Init();
+	uiManager.Init();
 
-    camera3D.SetPosition(Vec3(0, 0, 70));
+    asteroidSystem.SetPlanetSystem(&planetSystem);
+    asteroidSystem.Init();
+
+    camera3D.SetPosition(Vec3(0, 0, 50));
     camera3D.SetTarget(Vec3(0, 0, 0));
     camera3D.SetUp(Vec3(0, 1, 0));
 
@@ -54,17 +53,44 @@ void Update(float deltaTime) {
     player.Update(deltaTime);
 
     Vec3 newPlayerPos = player.GetPosition();
+    Vec3 playerVel = player.GetVelocityVector();
 
-    // Shooting
-    if (App::IsMousePressed(GLUT_LEFT_BUTTON)) {
-        if (shootCooldown <= 0.0f) {
-            bulletSystem.SpawnBulletDirectional(player.GetPosition(), player.GetAimDirection());
-            shootCooldown = 0.08f;
+    // Update towing system
+    towingSystem.Update(deltaTime, newPlayerPos, playerVel,
+        &asteroidSystem, &planetSystem);
+
+    // === CRITICAL: Mark towed asteroid to disable AI ===
+    Asteroid* asteroids = asteroidSystem.GetAsteroids();
+    int maxAsteroids = asteroidSystem.GetMaxAsteroids();
+
+    for (int i = 0; i < maxAsteroids; i++) {
+        if (asteroids[i].active) {
+            // Set towed flag (disables AI)
+            asteroids[i].isTowed = (towingSystem.IsTowing() &&
+                i == towingSystem.GetTowedAsteroidIndex());
+
+            if (towingSystem.IsTowing()) {
+                int towedIdx = towingSystem.GetTowedAsteroidIndex();
+                if (towedIdx >= 0 && towedIdx < asteroidSystem.GetMaxAsteroids()) {
+                    asteroids[towedIdx].isPersistent = true;  // Already set on grab?  
+                    // Update sector live  
+                    int newSX, newSY;
+                    asteroidSystem.GetSectorCoords(asteroids[towedIdx].position, newSX, newSY);
+                    asteroids[towedIdx].sectorX = newSX;
+                    asteroids[towedIdx].sectorY = newSY;
+                }
+            }
         }
     }
-    if (shootCooldown > 0.0f) {
-        shootCooldown -= dt;
+
+    // Handle 'E' key for grab/deposit
+    static bool eKeyWasPressed = false;
+    bool eKeyPressed = App::IsKeyPressed(App::KEY_E);
+
+    if (eKeyPressed && !eKeyWasPressed) {
+        towingSystem.HandleInput(newPlayerPos, &asteroidSystem, &planetSystem);
     }
+    eKeyWasPressed = eKeyPressed;
 
     // Camera follows player
     Vec3 playerPos = player.GetPosition();
@@ -82,10 +108,10 @@ void Update(float deltaTime) {
     camera3D.SetUp(Vec3(0, 1, 0));
 
     // Update systems
-    bulletSystem.Update(deltaTime);
-    asteroidSystem.Update(deltaTime, playerPos, &planetSystem);
     planetSystem.Update(deltaTime, playerPos);
+    asteroidSystem.Update(deltaTime, playerPos, &planetSystem);
     starField.Update(playerPos);
+    uiManager.Update(deltaTime);
 
     // === PLANET-ASTEROID COLLISION (RIGID WALL) ===
     for (int i = 0; i < asteroidSystem.GetMaxAsteroids(); i++) {
@@ -142,18 +168,6 @@ void Update(float deltaTime) {
     if (knockback.x != 0.0f || knockback.y != 0.0f) {
         player.ApplyKnockback(knockback);
     }
-
-    // Bullet-asteroid collision
-    for (int b = 0; b < 100; b++) {
-        Vec3 bulletPos, bulletVel;
-        float bulletSize;
-        if (bulletSystem.GetBulletData(b, bulletPos, bulletVel, bulletSize)) {
-            int hitIndex = asteroidSystem.CheckBulletCollision(bulletPos, bulletVel, bulletSize);
-            if (hitIndex >= 0) {
-                bulletSystem.DestroyBullet(b);
-            }
-        }
-    }
 }
 
 void Render() {
@@ -164,10 +178,33 @@ void Render() {
     planetSystem.Render(camera3D);
     asteroidSystem.Render(camera3D);
     player.Render(camera3D);
-    bulletSystem.Render(camera3D);
 
-    // Crosshair
-    DrawCrosshair();
+    towingSystem.Render(camera3D, &asteroidSystem, &planetSystem);
+
+    // Player position label (world space)
+    Vec3 playerPos = player.GetPosition();
+
+    char posText[64];
+    sprintf(posText, "Position: X:%.1f Y:%.1f", playerPos.x, playerPos.y);
+
+    uiManager.AddText("player_pos", 10.0f, 720.0f, posText,
+        1.0f, 1.0f, 0.3f, GLUT_BITMAP_HELVETICA_12);
+
+    if (towingSystem.IsTowing()) {
+        float screenCenterX = APP_VIRTUAL_WIDTH / 2.0f - 40.0f;
+        float bottomY = (APP_VIRTUAL_HEIGHT / 2.0f) - 340.0f;  // 80 pixels from bottom
+
+        uiManager.AddText("towing_title", screenCenterX, bottomY + 20.0f, "TOWING ASTEROID",
+            1.0f, 1.0f, 0.3f, GLUT_BITMAP_HELVETICA_12);
+        uiManager.AddText("towing_hint", screenCenterX, bottomY, "Fly to planet and press [E]",
+            0.8f, 0.8f, 0.8f, GLUT_BITMAP_HELVETICA_10);
+    }
+    else {
+        uiManager.RemoveText("towing_title");
+        uiManager.RemoveText("towing_hint");
+    }
+
+    uiManager.Render();
 }
 
 void Shutdown() {
