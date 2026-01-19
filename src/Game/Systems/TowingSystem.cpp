@@ -198,7 +198,7 @@ void TowingSystem::DepositAsteroid(int planetIndex, AsteroidSystem* asteroidSyst
     // Much smaller resource amounts (1-10 range)
     // Asteroid sizes typically range from 0.5 to 2.0
     float sizeMultiplier = ast->size / 2.0f;  // Normalize (0.25 to 1.0)
-    float resourceAmount = 1.0f + (sizeMultiplier * 9.0f);  // 1 to 10 range
+    float resourceAmount = 10.0f + (sizeMultiplier * 50.0f);  // 1 to 10 range
 
     // Clamp to ensure 1-10 range
     if (resourceAmount < 1.0f) resourceAmount = 1.0f;

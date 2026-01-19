@@ -308,11 +308,29 @@ void PlanetSystem::Update(float deltaTime, const Vec3& playerPos) {
             planets[i].currentRotation += 360.0f;
         }
 
-        // Slowly regenerate water (0.1 per second)
-        if (planets[i].waterLevel < 100.0f) {
-            planets[i].waterLevel += 0.1f * dt;
+        // Slowly degenerate resources (random per second)
+        if (planets[i].waterLevel > 0.0f) {
+            planets[i].waterLevel -= 2.0f * dt;
             if (planets[i].waterLevel > 100.0f) {
                 planets[i].waterLevel = 100.0f;
+            }
+        }
+        if (planets[i].ironLevel > 0.0f) {
+            planets[i].ironLevel -= 1.0f * dt;
+            if (planets[i].ironLevel > 100.0f) {
+                planets[i].ironLevel = 100.0f;
+            }
+        }
+        if (planets[i].energyLevel > 0.0f) {
+            planets[i].energyLevel -= 1.5f * dt;
+            if (planets[i].energyLevel > 100.0f) {
+                planets[i].energyLevel = 100.0f;
+            }
+        }
+        if (planets[i].carbonLevel > 0.0f) {
+            planets[i].carbonLevel -= 2.5f * dt;
+            if (planets[i].carbonLevel > 100.0f) {
+                planets[i].carbonLevel = 100.0f;
             }
         }
     }
@@ -339,12 +357,13 @@ void PlanetSystem::Render(const Camera3D& camera) {
 
         Vec3 rotation(0, 0, planets[i].currentRotation);
 
-        // White color
-        float white = 1.0f;
+        // Visual feedback: Color by resource levels
+        float avgResource = (planets[i].ironLevel + planets[i].waterLevel +
+            planets[i].carbonLevel + planets[i].energyLevel) / 400.0f;
 
         Renderer3D::DrawMesh(planetMesh, planets[i].position, rotation,
             Vec3(planets[i].size, planets[i].size, planets[i].size),
-            camera, white, white, white, false);
+            camera, 0.3f + avgResource * 0.7f, avgResource, 0.3f, false);
 
         float labelOffset = -(planets[i].size + 3.0f);  // Negative = below
 
