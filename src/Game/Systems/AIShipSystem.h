@@ -35,6 +35,9 @@ struct AIShip
 
     // Timers to avoid heavy scanning every frame
     float retargetTimer = 0.0f;
+
+    int consecutiveHits = 0;
+    float hitComboTimer = 0.0f;
 };
 
 class AIShipSystem
@@ -50,6 +53,11 @@ public:
     AIShip* GetShips() { return ships; }
     const AIShip* GetShips() const { return ships; }
 
+    void OnShipHit(int shipIndex);
+
+    // Add to public section
+    void ResolveCollisionsWithAsteroids(AsteroidSystem& asteroidSystem);
+
 private:
     static const int MAX_AI_SHIPS = 84;
 
@@ -64,10 +72,21 @@ private:
     int FindBestAsteroidTarget(const AIShip& ship, const Planet& parent,
         AsteroidSystem& asteroidSystem) const;
 
+    bool IsPlanetFrozen(int planetIndex) const;
+
     void UpdateAI(int shipIndex, AIShip& ship, float dt, PlanetSystem& planetSystem, AsteroidSystem& asteroidSystem);
     void ApplySteering(AIShip& ship, const Vec3& targetPos, float dt, float maxSpeed, float accel);
 
+    void FreezePlanetFleet(int planetIndex);
+
     bool IsNear(const Vec3& a, const Vec3& b, float dist) const;
+
+    struct PlanetFreezeState {
+        int planetIndex = -1;
+        float freezeTimer = 0.0f;
+    };
+    PlanetFreezeState frozenPlanets[20];  // Max planets
+
 };
 
 #endif

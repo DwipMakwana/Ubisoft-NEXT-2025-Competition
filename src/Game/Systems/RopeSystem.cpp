@@ -41,9 +41,6 @@ void RopeSystem::CreateRope(const Vec3& start, const Vec3& end, int numSegments)
 
         nodes.push_back(node);
     }
-
-    Logger::LogFormat("Rope created: %d nodes, segment length: %.2f\n",
-        numSegments, segmentLength);
 }
 
 void RopeSystem::Update(float deltaTime) {

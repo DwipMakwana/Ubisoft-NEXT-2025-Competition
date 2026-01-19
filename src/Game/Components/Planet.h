@@ -31,6 +31,8 @@ struct Planet {
     float energyLevel;     // 0.0 to 100.0
     float carbonLevel;     // 0.0 to 100.0
     float ironLevel;       // 0.0 to 100.0
+
+    float r, g, b;  // Add these fields to struct Planet
 };
 
 struct PlanetSectorKey {

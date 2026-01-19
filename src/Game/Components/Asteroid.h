@@ -30,6 +30,7 @@ struct Asteroid {
     Vec3 velocity;
 
     int claimedByAIShip = -1;
+    bool claimedByPlayer = false;
 
     float size;            // radius
     float mass;
@@ -68,6 +69,12 @@ struct SectorKey {
         if (x != other.x) return x < other.x;
         return y < other.y;
     }
+};
+
+struct CollisionResult
+{
+    Vec3 pushDirection = Vec3(0, 0, 0);
+    bool collided = false;
 };
 
 class AsteroidSystem {
@@ -117,10 +124,6 @@ private:
     void GetGridCell(const Vec3& pos, int& cellX, int& cellY);
     void GetNearbyAsteroids(int cellX, int cellY, std::vector<int>& nearby);
 
-    // Physics / collision
-    void ResolveAsteroidCollisions(const Vec3& playerPos);
-    void ResolveCollision(int index1, int index2);
-
     // Fragments
     void BreakAsteroidIntoFragments(int index, const Vec3& impactPoint, const Vec3& impactVel);
     void UpdateFragment(int index, float deltaTime);
@@ -140,8 +143,12 @@ public:
     int  GetActiveAsteroidCount() const;
     int  GetMaxAsteroids() const { return MAX_ASTEROIDS; }
 
-    // Collision queries
-    Vec3  CheckPlayerCollision(const Vec3& playerPos, float playerRadius, const Vec3& playerVel);
+	void ResolveCollision(int index1, int index2);
+
+    // Asteroid vs Asteroid (existing)
+    void ResolveAsteroidCollisions(const Vec3& playerPos);
+    // Asteroid vs External Object (player, bullets)
+    void ResolveExternalCollision(const Vec3& objectPos, float objectRadius, const Vec3& objectVel, Vec3& outPush);
 
     void  DestroyAsteroid(int index);
     void  Clear();

@@ -25,16 +25,45 @@ void AIShipSystem::Update(float deltaTime, PlanetSystem& planetSystem, AsteroidS
     // Ensure ships exist for currently active planets
     SpawnForActivePlanets(planetSystem);
 
+    for (int i = 0; i < 20; i++) {
+        if (frozenPlanets[i].freezeTimer > 0.0f) {
+            frozenPlanets[i].freezeTimer -= dt;
+        }
+    }
+
     for (int i = 0; i < MAX_AI_SHIPS; i++)
     {
         if (!ships[i].active) continue;
+
+        if (ships[i].active && ships[i].hitComboTimer > 0.0f) {
+            ships[i].hitComboTimer -= dt;
+            if (ships[i].hitComboTimer <= 0.0f) {
+                ships[i].consecutiveHits = 0;  // Reset combo if no hits in 2s
+            }
+        }
+
+        Vec3 shipPush(0, 0, 0);
+        asteroidSystem.ResolveExternalCollision(
+            ships[i].position,
+            ships[i].radius,  // 1.2f matches AIShip.radius
+            ships[i].velocity,
+            shipPush
+        );
+
+        if (shipPush.LengthSquared() > 0.01f) {
+            ships[i].position.x += shipPush.x;
+            ships[i].position.y += shipPush.y;
+            ships[i].position.z += shipPush.z;
+            // Optional: reflect ship velocity like asteroids do
+        }
+
         UpdateAI(i, ships[i], dt, planetSystem, asteroidSystem);
     }
 }
 
 void AIShipSystem::Render(const Camera3D& camera, AsteroidSystem& asteroidSystem, PlanetSystem& planetSystem)
 {
-    Mesh3D shipMesh = Mesh3D::CreatePyramid(1.0f, 1.5f);
+    Mesh3D shipMesh = Mesh3D::CreateCube(1.0f);
 
     for (int i = 0; i < MAX_AI_SHIPS; i++)
     {
@@ -57,7 +86,7 @@ void AIShipSystem::Render(const Camera3D& camera, AsteroidSystem& asteroidSystem
         Vec3 shipRot(0, 0, facingAngleDeg - 90.0f);  // Degrees
 
         // 3D MESH SHIP (player scale + rotation)
-        Vec3 shipScale(ship.radius * 1.0f, ship.radius * 1.0f, ship.radius * 1.0f);  // Match player size
+        Vec3 shipScale(1.0, 2.0f, 1.0f);  // Match player size
 
         // Draw with Mesh3D (matches your Planet/Asteroid rendering style)
         Renderer3D::DrawMesh(shipMesh, ship.position, shipRot, shipScale,
@@ -78,7 +107,7 @@ void AIShipSystem::SpawnForActivePlanets(PlanetSystem& planetSystem)
         if (!planets[p].active) continue;
 
         // SKIP HOME PLANET (DOUBLE CHECK!)
-        if (planets[p].isHomePlanet) continue;
+        //if (planets[p].isHomePlanet) continue;
 
         // PER-PLANET DESPERATION (not global average!)
         float planetAvg = (planets[p].ironLevel + planets[p].waterLevel +
@@ -139,37 +168,9 @@ void AIShipSystem::SpawnShip(int slot, int planetIndex, const PlanetSystem& plan
     ships[slot].position = parent.position + Vec3(cosf(shipAngle) * spawnDist,
         sinf(shipAngle) * spawnDist, 0.0f);
 
-    // === BRIGHT PLANET-MATCHED SHIP COLORS ===
-    float avgResource = (parent.ironLevel + parent.waterLevel +
-        parent.carbonLevel + parent.energyLevel) / 400.0f;
-
-    float hue = avgResource * 300.0f;  // 0→300 degrees
-    float h = fmodf(hue / 60.0f, 6.0f);
-    float s = 0.8f + avgResource * 0.2f;
-    float v = 0.6f + avgResource * 0.4f;  // Bright 0.6→1.0
-
-    float c = v * s;
-    float x = c * (1.0f - fabsf(fmodf(h, 2.0f) - 1.0f));
-    float m = v - c;
-
-    if (h <= 1.0f) {
-        ships[slot].r = c + m; ships[slot].g = x + m; ships[slot].b = m;
-    }
-    else if (h <= 2.0f) {
-        ships[slot].r = x + m; ships[slot].g = c + m; ships[slot].b = m;
-    }
-    else if (h <= 3.0f) {
-        ships[slot].r = m; ships[slot].g = c + m; ships[slot].b = x + m;
-    }
-    else if (h <= 4.0f) {
-        ships[slot].r = m; ships[slot].g = x + m; ships[slot].b = c + m;
-    }
-    else if (h <= 5.0f) {
-        ships[slot].r = x + m; ships[slot].g = m; ships[slot].b = c + m;
-    }
-    else {
-        ships[slot].r = c + m; ships[slot].g = m; ships[slot].b = x + m;
-    }
+    ships[slot].r = parent.r;
+    ships[slot].g = parent.g;
+    ships[slot].b = parent.b;
 
     ships[slot].retargetTimer = 0.0f;
 }
@@ -250,8 +251,86 @@ void AIShipSystem::ApplySteering(AIShip& ship, const Vec3& targetPos, float dt, 
     ship.position = ship.position + ship.velocity * dt;
 }
 
+void AIShipSystem::OnShipHit(int shipIndex) {
+    if (shipIndex < 0 || shipIndex >= MAX_AI_SHIPS) return;
+
+    AIShip& ship = ships[shipIndex];
+    if (!ship.active) return;
+
+    ship.consecutiveHits++;
+    ship.hitComboTimer = 2.0f;  // 2s window for combo
+
+    Logger::LogFormat("Ship %d hit! Combo: %d", shipIndex, ship.consecutiveHits);
+
+    // 3+ hits = FREEZE ENTIRE PLANET FLEET!
+    if (ship.consecutiveHits >= 3) {
+        FreezePlanetFleet(ship.parentPlanetIndex);
+        ship.consecutiveHits = 0;  // Reset combo
+    }
+}
+
+void AIShipSystem::ResolveCollisionsWithAsteroids(AsteroidSystem& asteroidSystem) {
+    for (int i = 0; i < MAX_AI_SHIPS; i++) {
+        if (!ships[i].active) continue;
+
+        Vec3 shipPush(0, 0, 0);
+        asteroidSystem.ResolveExternalCollision(
+            ships[i].position,
+            ships[i].radius,  // Exactly 1.2f like player
+            ships[i].velocity,
+            shipPush
+        );
+
+        if (shipPush.LengthSquared() > 0.01f) {
+            ships[i].position.x += shipPush.x;
+            ships[i].position.y += shipPush.y;
+            ships[i].position.z += shipPush.z;
+            // Asteroids auto-reflect velocity via ResolveExternalCollision
+        }
+    }
+}
+
+void AIShipSystem::FreezePlanetFleet(int planetIndex) {
+    // Find freeze slot
+    int slot = -1;
+    for (int i = 0; i < 20; i++) {
+        if (frozenPlanets[i].planetIndex == planetIndex) {
+            slot = i;
+            break;
+        }
+        if (frozenPlanets[i].freezeTimer <= 0.0f) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot >= 0) {
+        frozenPlanets[slot].planetIndex = planetIndex;
+        frozenPlanets[slot].freezeTimer = 3.0f;  // 3 second freeze
+        Logger::LogFormat("Planet %d fleet FROZEN for 3s!", planetIndex);
+    }
+}
+
+bool AIShipSystem::IsPlanetFrozen(int planetIndex) const {
+    for (int i = 0; i < 20; i++) {
+        if (frozenPlanets[i].planetIndex == planetIndex &&
+            frozenPlanets[i].freezeTimer > 0.0f) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void AIShipSystem::UpdateAI(int shipIndex, AIShip& ship, float dt, PlanetSystem& planetSystem, AsteroidSystem& asteroidSystem)
 {
+    if (IsPlanetFrozen(ship.parentPlanetIndex)) {
+        if (ship.targetAsteroidIndex >= 0) {
+            Asteroid* ast = &asteroidSystem.GetAsteroids()[ship.targetAsteroidIndex];
+            ast->velocity = Vec3(0, 0, 0);  // Stop movement
+        }
+        return;  // Skip all AI: no movement, targeting, or towing during freeze
+    }
+
     Planet* planets = planetSystem.GetPlanets();
     if (ship.parentPlanetIndex < 0) return;
 

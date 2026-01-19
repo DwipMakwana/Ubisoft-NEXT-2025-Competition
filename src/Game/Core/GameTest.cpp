@@ -18,24 +18,25 @@
 #include <Systems/TowingSystem.h>
 #include <UI/UIManager.h>
 #include <Systems/AIShipSystem.h>
+#include <Systems/BulletSystem.h>
 
 Camera3D camera3D;
 Player player;
 AsteroidSystem asteroidSystem;
 StarField starField;
 PlanetSystem planetSystem;
-TowingSystem towingSystem;
 UIManager uiManager;
 AIShipSystem aiShips;
+BulletSystem bulletSystem;
 
 void Init() {
-    Logger::LogInfo("=== GAME INITIALIZATION START ===");
-
     srand((unsigned int)time(nullptr));
 
     player.Init();
     planetSystem.Init();
 	uiManager.Init();
+    bulletSystem.Init();
+
     aiShips.Init();
 
     asteroidSystem.SetPlanetSystem(&planetSystem);
@@ -46,8 +47,6 @@ void Init() {
     camera3D.SetUp(Vec3(0, 1, 0));
 
     starField.Init(player.GetPosition());
-
-    Logger::LogInfo("=== GAME INITIALIZATION COMPLETE ===");
 }
 
 void Update(float deltaTime) {
@@ -57,43 +56,6 @@ void Update(float deltaTime) {
 
     Vec3 newPlayerPos = player.GetPosition();
     Vec3 playerVel = player.GetVelocityVector();
-
-    // Update towing system
-    towingSystem.Update(deltaTime, newPlayerPos, playerVel,
-        &asteroidSystem, &planetSystem);
-
-    // === CRITICAL: Mark towed asteroid to disable AI ===
-    Asteroid* asteroids = asteroidSystem.GetAsteroids();
-    int maxAsteroids = asteroidSystem.GetMaxAsteroids();
-
-    for (int i = 0; i < maxAsteroids; i++) {
-        if (asteroids[i].active) {
-            // Set towed flag (disables AI)
-            asteroids[i].isTowed = (towingSystem.IsTowing() &&
-                i == towingSystem.GetTowedAsteroidIndex());
-
-            if (towingSystem.IsTowing()) {
-                int towedIdx = towingSystem.GetTowedAsteroidIndex();
-                if (towedIdx >= 0 && towedIdx < asteroidSystem.GetMaxAsteroids()) {
-                    asteroids[towedIdx].isPersistent = true;  // Already set on grab?  
-                    // Update sector live  
-                    int newSX, newSY;
-                    asteroidSystem.GetSectorCoords(asteroids[towedIdx].position, newSX, newSY);
-                    asteroids[towedIdx].sectorX = newSX;
-                    asteroids[towedIdx].sectorY = newSY;
-                }
-            }
-        }
-    }
-
-    // Handle 'E' key for grab/deposit
-    static bool eKeyWasPressed = false;
-    bool eKeyPressed = App::IsKeyPressed(App::KEY_E);
-
-    if (eKeyPressed && !eKeyWasPressed) {
-        towingSystem.HandleInput(newPlayerPos, &asteroidSystem, &planetSystem);
-    }
-    eKeyWasPressed = eKeyPressed;
 
     // Camera follows player
     Vec3 playerPos = player.GetPosition();
@@ -110,68 +72,33 @@ void Update(float deltaTime) {
     camera3D.SetTarget(Vec3(newCameraPos.x, newCameraPos.y, 0));
     camera3D.SetUp(Vec3(0, 1, 0));
 
+    // SHOOT (Left Click)
+    if (App::IsKeyPressed(App::KEY_SPACE))
+    {
+        Vec3 shootDir = player.GetAimDirection();  // Uses rotation!
+        bulletSystem.ShootBullet(player.GetPosition(), shootDir);
+    }
+
     // Update systems
     planetSystem.Update(deltaTime, playerPos);
     asteroidSystem.Update(deltaTime, playerPos, &planetSystem);
     starField.Update(playerPos);
     uiManager.Update(deltaTime);
-
+    bulletSystem.Update(deltaTime, aiShips);
     aiShips.Update(deltaTime, planetSystem, asteroidSystem);
+    aiShips.ResolveCollisionsWithAsteroids(asteroidSystem);
 
-    // === PLANET-ASTEROID COLLISION (RIGID WALL) ===
-    for (int i = 0; i < asteroidSystem.GetMaxAsteroids(); i++) {
-        Asteroid* ast = &asteroidSystem.GetAsteroids()[i];
-        if (!ast->active || ast->isFragment) continue;
+    Vec3 playerPush;
+    asteroidSystem.ResolveExternalCollision(player.GetPosition(), 1.2f,
+        player.GetVelocityVector(), playerPush);
 
-        Vec3 pushDir;
-        if (planetSystem.CheckAsteroidCollision(ast->position, ast->size, pushDir)) {
-            // RIGID WALL: Just push asteroid out, stop velocity toward planet
-            ast->position.x += pushDir.x;
-            ast->position.y += pushDir.y;
-            ast->position.z += pushDir.z;
-
-            // Stop velocity component moving toward planet
-            float pushLen = sqrtf(pushDir.x * pushDir.x + pushDir.y * pushDir.y + pushDir.z * pushDir.z);
-            if (pushLen > 0.001f) {
-                Vec3 pushNormal;
-                pushNormal.x = pushDir.x / pushLen;
-                pushNormal.y = pushDir.y / pushLen;
-                pushNormal.z = pushDir.z / pushLen;
-
-                // Remove velocity component going into planet
-                float velDot = ast->velocity.x * pushNormal.x +
-                    ast->velocity.y * pushNormal.y +
-                    ast->velocity.z * pushNormal.z;
-
-                if (velDot < 0) {  // Moving toward planet
-                    ast->velocity.x -= velDot * pushNormal.x;
-                    ast->velocity.y -= velDot * pushNormal.y;
-                    ast->velocity.z -= velDot * pushNormal.z;
-                }
-            }
-        }
-    }
-
-    // == = PLANET - PLAYER COLLISION(FIXED - NO STICKING) == =
-    Vec3 planetPush;
-    if (planetSystem.CheckPlayerCollision(playerPos, 1.2f, planetPush)) {
-        // ONLY push player out, don't touch velocity at all
-        playerPos.x += planetPush.x;
-        playerPos.y += planetPush.y;
-        playerPos.z += planetPush.z;
-
+    if (playerPush.LengthSquared() > 0.01f)
+    {
+        Vec3 playerPos = player.GetPosition();
+        playerPos.x += playerPush.x;
+        playerPos.y += playerPush.y;
+        playerPos.z += playerPush.z;
         player.SetPosition(playerPos);
-
-        // That's it! No velocity changes = smooth sliding
-    }
-
-    // Player-asteroid collision
-    float playerCollisionRadius = 1.2f;
-    Vec3 playerVelocity = player.GetVelocityVector();
-    Vec3 knockback = asteroidSystem.CheckPlayerCollision(playerPos, playerCollisionRadius, playerVelocity);
-
-    if (knockback.x != 0.0f || knockback.y != 0.0f) {
-        player.ApplyKnockback(knockback);
     }
 }
 
@@ -183,11 +110,8 @@ void Render() {
     planetSystem.Render(camera3D);
     asteroidSystem.Render(camera3D);
     player.Render(camera3D);
-
-    towingSystem.Render(camera3D, &asteroidSystem, &planetSystem);
-
     aiShips.Render(camera3D, asteroidSystem, planetSystem);
-
+    bulletSystem.Render(camera3D);
 
     // Player position label (world space)
     Vec3 playerPos = player.GetPosition();
@@ -197,20 +121,6 @@ void Render() {
 
     uiManager.AddText("player_pos", 10.0f, 720.0f, posText,
         1.0f, 1.0f, 0.3f, GLUT_BITMAP_HELVETICA_12);
-
-    if (towingSystem.IsTowing()) {
-        float screenCenterX = APP_VIRTUAL_WIDTH / 2.0f - 40.0f;
-        float bottomY = (APP_VIRTUAL_HEIGHT / 2.0f) - 340.0f;  // 80 pixels from bottom
-
-        uiManager.AddText("towing_title", screenCenterX, bottomY + 20.0f, "TOWING ASTEROID!",
-            1.0f, 1.0f, 0.3f, GLUT_BITMAP_HELVETICA_12);
-        uiManager.AddText("towing_hint", screenCenterX - 70.0f, bottomY, "Fly to your planet and press [E] to replenish resource",
-            0.8f, 0.8f, 0.8f, GLUT_BITMAP_HELVETICA_10);
-    }
-    else {
-        uiManager.RemoveText("towing_title");
-        uiManager.RemoveText("towing_hint");
-    }
 
     uiManager.Render();
 }

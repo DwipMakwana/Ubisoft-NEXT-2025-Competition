@@ -95,6 +95,7 @@ void AsteroidSystem::UnloadDistantSectors(const Vec3& playerPos) {
             if (a.sectorX == key.x && a.sectorY == key.y) {
                 a.active = false;
                 a.claimedByAIShip = -1;
+                a.claimedByPlayer = false;
             }
         }
         loadedSectors.erase(key);
@@ -287,33 +288,6 @@ void AsteroidSystem::ResolveCollision(int index1, int index2) {
     }
 }
 
-void AsteroidSystem::ResolveAsteroidCollisions(const Vec3& playerPos) {
-    UpdateSpatialGrid();
-
-    float visibleRangeSq = 90.0f * 90.0f;
-
-    for (int i = 0; i < MAX_ASTEROIDS; i++) {
-        Asteroid& a = asteroids[i];
-        if (!a.active || a.isFragment) continue;
-
-        float dx = a.position.x - playerPos.x;
-        float dy = a.position.y - playerPos.y;
-        float distSq = dx * dx + dy * dy;
-        if (distSq > visibleRangeSq) continue;
-
-        int cellX, cellY;
-        GetGridCell(a.position, cellX, cellY);
-        std::vector<int> nearby;
-        GetNearbyAsteroids(cellX, cellY, nearby);
-
-        for (int j : nearby) {
-            if (j <= i) continue;
-            if (!asteroids[j].active || asteroids[j].isFragment) continue;
-            ResolveCollision(i, j);
-        }
-    }
-}
-
 void AsteroidSystem::Update(float deltaTime,
     const Vec3& playerPos,
     PlanetSystem* planetSystem) {
@@ -335,24 +309,23 @@ void AsteroidSystem::Update(float deltaTime,
     for (int i = 0; i < MAX_ASTEROIDS; i++) {
         Asteroid& a = asteroids[i];
         if (!a.active) continue;
+        if (a.isFragment) { UpdateFragment(i, dt); continue; }
 
-        if (a.isFragment) {
-            UpdateFragment(i, dt);
+        // ALWAYS APPLY DRAG (even towed!)
+        a.velocity = a.velocity * 0.995f;  // Stronger drag: 0.5 velocity/sec loss
+
+        if (a.isTowed)
+        {
+            // TowingSystem sets position/velocity independently
             continue;
         }
 
-        if (a.isTowed) {
-            // Position is controlled by towing system, skip physics
-            continue;
-        }
-
-        // Light drag
-        a.velocity = a.velocity * 0.998f;
-
-        // Integrate motion
+        // Free asteroid physics
         a.position.x += a.velocity.x * dt;
         a.position.y += a.velocity.y * dt;
         a.position.z += a.velocity.z * dt;
+
+        a.currentRotation += a.rotationSpeed * dt;
 
         // Rotation
         a.currentRotation += a.rotationSpeed * dt;
@@ -407,38 +380,95 @@ int AsteroidSystem::GetActiveAsteroidCount() const {
     return count;
 }
 
-Vec3 AsteroidSystem::CheckPlayerCollision(const Vec3& playerPos,
-    float playerRadius,
-    const Vec3& playerVel) {
-    Vec3 totalPush(0, 0, 0);
+void AsteroidSystem::ResolveAsteroidCollisions(const Vec3& playerPos)
+{
+    UpdateSpatialGrid();
+    float visibleRangeSq = 90.0f * 90.0f;
 
-    for (int i = 0; i < MAX_ASTEROIDS; i++) {
+    for (int i = 0; i < MAX_ASTEROIDS; i++)
+    {
         Asteroid& a = asteroids[i];
         if (!a.active || a.isFragment) continue;
 
-        // FIXED (pushing)
-        float dx = playerPos.x - a.position.x;
-        float dy = playerPos.y - a.position.y;
-        float dz = playerPos.z - a.position.z;
-        float distSq = dx * dx + dy * dy + dz * dz;
+        // Skip if far from player (culling)
+        float dx = a.position.x - playerPos.x;
+        float dy = a.position.y - playerPos.y;
+        if (dx * dx + dy * dy > visibleRangeSq) continue;
 
-        float minDist = playerRadius + a.size;
-        if (distSq < minDist * minDist && distSq > 0.0001f) {
-            float dist = sqrtf(distSq);
-            float overlap = minDist - dist;
+        int cellX, cellY;
+        GetGridCell(a.position, cellX, cellY);
 
-            // CORRECT: normal points FROM player TO asteroid = pushes player away
-            Vec3 normal(-dx / dist, -dy / dist, -dz / dist);
-            totalPush = totalPush + normal * overlap;
+        std::vector<int> nearby;
+        GetNearbyAsteroids(cellX, cellY, nearby);
+
+        for (int j : nearby)
+        {
+            if (j <= i) continue;  // Avoid double collision
+            ResolveCollision(i, j);  // Your existing perfect code!
         }
     }
+}
 
-    return totalPush;
+void AsteroidSystem::ResolveExternalCollision(const Vec3& extPos, float extRadius, const Vec3& extVel, Vec3& outPush)
+{
+    outPush = Vec3(0, 0, 0);
+
+    UpdateSpatialGrid();
+    int cellX, cellY;
+    GetGridCell(extPos, cellX, cellY);
+
+    std::vector<int> nearby;
+    GetNearbyAsteroids(cellX, cellY, nearby);
+
+    for (int astIdx : nearby)
+    {
+        Asteroid& ast = asteroids[astIdx];
+        if (!ast.active || ast.isFragment || ast.isTowed) continue;
+
+        float dx = extPos.x - ast.position.x;
+        float dy = extPos.y - ast.position.y;
+        float dz = extPos.z - ast.position.z;
+        float distSq = dx*dx + dy*dy + dz*dz;
+
+        float collisionDist = extRadius + ast.size;
+        if (distSq >= collisionDist * collisionDist || distSq < 0.001f) continue;
+
+        float dist = sqrtf(distSq);
+        float overlap = collisionDist - dist;
+
+        Vec3 normal(dx / dist, dy / dist, dz / dist);
+        outPush.x += normal.x * overlap * 2.0f;
+        outPush.y += normal.y * overlap * 2.0f;
+        outPush.z += normal.z * overlap * 2.0f;
+
+        // NATURAL DRIFT: Push asteroid + reflect velocity (like asteroid-asteroid)
+        ast.position.x -= normal.x * overlap;
+        ast.position.y -= normal.y * overlap;
+        ast.position.z -= normal.z * overlap;
+
+        // VELOCITY REFLECTION (same as asteroid vs asteroid)
+        float astVelDot = ast.velocity.Dot(normal);
+        if (astVelDot < 0)  // Moving toward collision
+        {
+            ast.velocity.x -= 2.0f * astVelDot * normal.x;
+            ast.velocity.y -= 2.0f * astVelDot * normal.y;
+            ast.velocity.z -= 2.0f * astVelDot * normal.z;
+        }
+    }
 }
 
 void AsteroidSystem::DestroyAsteroid(int index) {
     if (index < 0 || index >= MAX_ASTEROIDS) return;
-    asteroids[index].active = false;
+
+    Asteroid& ast = asteroids[index];
+    if (!ast.active) return;
+
+    // FULL CLEANUP
+    ast.active = false;
+    ast.velocity = Vec3(0, 0, 0);      // STOP MOVEMENT
+    ast.claimedByAIShip = -1;           // Release claim
+    ast.isTowed = false;                // Release towing
+    ast.lifetime = 0.0f;
 }
 
 void AsteroidSystem::Clear() {

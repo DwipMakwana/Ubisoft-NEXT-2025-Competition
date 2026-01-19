@@ -1,7 +1,7 @@
 //-----------------------------------------------------------------------------
 // Particle3D.cpp - 3D billboarded particles WITHOUT back-face culling
 //-----------------------------------------------------------------------------
-#include "../Systems/Particle3D.h"
+#include "../Rendering/Particle3D.h"
 #include "../Rendering/Renderer3D.h"
 #include "../Utilities/Logger.h"
 #include "App.h"

@@ -167,6 +167,10 @@ void PlanetSystem::Init() {
         planets[homeSlot].energyLevel = 50;
 
         planets[homeSlot].rotationSpeed = 15.0f;
+
+        planets[homeSlot].r = 1.0f;
+        planets[homeSlot].g = 1.0f;
+        planets[homeSlot].b = 1.0f;
     }
 }
 
@@ -267,6 +271,11 @@ void PlanetSystem::GenerateSectorPlanet(int sectorX, int sectorY) {
     planets[slot].energyLevel = 30.0f + (rand() % 1000) / 1000.0f * 70.0f;  // 30-100
     planets[slot].carbonLevel = 30.0f + (rand() % 1000) / 1000.0f * 70.0f;  // 30-100
     planets[slot].ironLevel = 30.0f + (rand() % 1000) / 1000.0f * 70.0f;    // 30-100
+
+    // Generate random bright colors (0.4-1.0 range for visibility)
+    planets[slot].r = 0.4f + (rand() % 1000) / 1000.0f * 0.6f;
+    planets[slot].g = 0.4f + (rand() % 1000) / 1000.0f * 0.6f;
+    planets[slot].b = 0.4f + (rand() % 1000) / 1000.0f * 0.6f;
 
     GeneratePlanetName(sectorX, sectorY, planets[slot].name, sizeof(planets[slot].name));
 
@@ -378,33 +387,6 @@ void PlanetSystem::Render(const Camera3D& camera) {
 
         Vec3 rotation(0, 0, planets[i].currentRotation);
 
-        // BRIGHT PALETTE based on resources [Replace existing color code]
-        float avgResource = (planets[i].ironLevel + planets[i].waterLevel +
-            planets[i].carbonLevel + planets[i].energyLevel) / 400.0f;
-
-        float baseBright = 0.6f + avgResource * 0.4f;  // 0.6→1.0 (bright!)
-
-        float r, g, b;
-        // Hue cycle for variety (bright rainbow)
-        float hue = avgResource * 300.0f;  // 0→300 degrees
-        float h = fmodf(hue / 60.0f, 6.0f);
-        float s = 0.8f + avgResource * 0.2f;
-        float v = baseBright;
-
-        // HSV → RGB (bright colors)
-        float c = v * s;
-        float x = c * (1.0f - fabsf(fmodf(h, 2.0f) - 1.0f));
-        float m = v - c;
-
-        if (h <= 1.0f) { r = c; g = x; b = 0; }
-        else if (h <= 2.0f) { r = x; g = c; b = 0; }
-        else if (h <= 3.0f) { r = 0; g = c; b = x; }
-        else if (h <= 4.0f) { r = 0; g = x; b = c; }
-        else if (h <= 5.0f) { r = x; g = 0; b = c; }
-        else { r = c; g = 0; b = x; }
-
-        r += m; g += m; b += m;
-
         bool isHomePlanet = (strcmp(planets[i].name, "Home Planet") == 0);
         if (isHomePlanet)
         {
@@ -416,7 +398,7 @@ void PlanetSystem::Render(const Camera3D& camera) {
         {
             Renderer3D::DrawMesh(planetMesh, planets[i].position, rotation,
                 Vec3(planets[i].size, planets[i].size, planets[i].size),
-                camera, r, g, b, false);
+                camera, planets[i].r, planets[i].g, planets[i].b, false);
         }
 
         float labelOffset = -(planets[i].size + 3.0f);  // Negative = below
