@@ -305,6 +305,31 @@ void AsteroidSystem::Update(float deltaTime,
         lastPlayerPos = playerPos;
     }
 
+    // NEW: Resolve asteroid-planet collisions (like player/ship external)
+    for (int i = 0; i < MAX_ASTEROIDS; i++) {
+        Asteroid& ast = asteroids[i];
+        if (!ast.active || ast.isFragment || ast.isTowed) continue;  // Skip fragments/towed
+
+        Vec3 planetPush(0, 0, 0);
+        planetSystem->CheckAsteroidCollision(ast.position, ast.size, planetPush);
+
+        if (planetPush.LengthSquared() > 0.01f) {
+            // Push asteroid out
+            ast.position.x += planetPush.x;
+            ast.position.y += planetPush.y;
+            ast.position.z += planetPush.z;
+
+            // Reflect asteroid velocity (like external collision does)
+            Vec3 normal = planetPush.Normalized();
+            float astVelDot = ast.velocity.Dot(normal);
+            if (astVelDot < 0) {  // Moving toward planet
+                ast.velocity.x -= 2.0f * astVelDot * normal.x;
+                ast.velocity.y -= 2.0f * astVelDot * normal.y;
+                ast.velocity.z -= 2.0f * astVelDot * normal.z;
+            }
+        }
+    }
+
     // Update asteroids (physics only)
     for (int i = 0; i < MAX_ASTEROIDS; i++) {
         Asteroid& a = asteroids[i];

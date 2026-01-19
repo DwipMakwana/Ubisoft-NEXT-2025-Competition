@@ -53,7 +53,7 @@ public:
     AIShip* GetShips() { return ships; }
     const AIShip* GetShips() const { return ships; }
 
-    void OnShipHit(int shipIndex);
+    void OnShipHit(int shipIndex, AsteroidSystem& asteroidSystem);
 
     // Add to public section
     void ResolveCollisionsWithAsteroids(AsteroidSystem& asteroidSystem);

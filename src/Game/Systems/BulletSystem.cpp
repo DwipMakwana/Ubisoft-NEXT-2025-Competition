@@ -42,7 +42,7 @@ void BulletSystem::ShootBullet(const Vec3& playerPos, const Vec3& direction)
     fireRateCooldown = fireRateInterval;  // Reset cooldown
 }
 
-void BulletSystem::Update(float deltaTime, AIShipSystem& aiShips)
+void BulletSystem::Update(float deltaTime, AIShipSystem& aiShips, AsteroidSystem& asteroidSystem)
 {
     float dt = deltaTime / 1000.0f;
 
@@ -67,10 +67,10 @@ void BulletSystem::Update(float deltaTime, AIShipSystem& aiShips)
     }
 
     // Check collisions
-    CheckCollisions(aiShips);
+    CheckCollisions(aiShips, asteroidSystem);
 }
 
-void BulletSystem::CheckCollisions(AIShipSystem& aiShips)
+void BulletSystem::CheckCollisions(AIShipSystem& aiShips, AsteroidSystem& asteroidSystem)
 {
     AIShip* ships = aiShips.GetShips();
     int maxShips = aiShips.GetMaxShips();
@@ -92,7 +92,7 @@ void BulletSystem::CheckCollisions(AIShipSystem& aiShips)
             if (distSq < hitDist * hitDist)
             {
                 // HIT!
-                aiShips.OnShipHit(s);
+                aiShips.OnShipHit(s, asteroidSystem);
                 bullets[b].active = false;  // Destroy bullet
                 break;
             }

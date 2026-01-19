@@ -24,7 +24,7 @@ public:
     BulletSystem();
 
     void Init();
-    void Update(float deltaTime, AIShipSystem& aiShips);
+    void Update(float deltaTime, AIShipSystem& aiShips, AsteroidSystem& asteroidSystem);
     void Render(const Camera3D& camera);
 
     // Shooting
@@ -36,7 +36,7 @@ private:
 
     // Helpers
     int FindFreeBullet();
-    void CheckCollisions(AIShipSystem& aiShips);
+    void CheckCollisions(AIShipSystem& aiShips, AsteroidSystem& asteroidSystem);
 
     float fireRateCooldown = 0.0f;
     float fireRateInterval = 0.15f;

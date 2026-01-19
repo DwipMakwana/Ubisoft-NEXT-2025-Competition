@@ -84,7 +84,7 @@ void Update(float deltaTime) {
     asteroidSystem.Update(deltaTime, playerPos, &planetSystem);
     starField.Update(playerPos);
     uiManager.Update(deltaTime);
-    bulletSystem.Update(deltaTime, aiShips);
+    bulletSystem.Update(deltaTime, aiShips, asteroidSystem);
     aiShips.Update(deltaTime, planetSystem, asteroidSystem);
     aiShips.ResolveCollisionsWithAsteroids(asteroidSystem);
 

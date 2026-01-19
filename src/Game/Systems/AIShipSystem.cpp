@@ -251,7 +251,7 @@ void AIShipSystem::ApplySteering(AIShip& ship, const Vec3& targetPos, float dt, 
     ship.position = ship.position + ship.velocity * dt;
 }
 
-void AIShipSystem::OnShipHit(int shipIndex) {
+void AIShipSystem::OnShipHit(int shipIndex, AsteroidSystem& asteroidSystem) {
     if (shipIndex < 0 || shipIndex >= MAX_AI_SHIPS) return;
 
     AIShip& ship = ships[shipIndex];
@@ -265,7 +265,18 @@ void AIShipSystem::OnShipHit(int shipIndex) {
     // 3+ hits = FREEZE ENTIRE PLANET FLEET!
     if (ship.consecutiveHits >= 3) {
         FreezePlanetFleet(ship.parentPlanetIndex);
-        ship.consecutiveHits = 0;  // Reset combo
+
+        // NEW: Detach towed asteroid on freeze
+        if (ship.towing.IsTowing()) {
+            ship.towing.ReleaseAsteroid();
+            if (ship.targetAsteroidIndex >= 0) {
+                Asteroid& ast = asteroidSystem.GetAsteroids()[ship.targetAsteroidIndex];
+                ast.claimedByAIShip = -1;
+            }
+            ship.targetAsteroidIndex = -1;
+        }
+
+        ship.consecutiveHits = 0;
     }
 }
 

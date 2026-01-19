@@ -56,13 +56,14 @@ public:
     void GrabAsteroid(int asteroidIndex, const Vec3& playerPos, AsteroidSystem* asteroidSystem);
     void DepositAsteroid(int planetIndex, AsteroidSystem* asteroidSystem,PlanetSystem* planetSystem);
 
+    void ReleaseAsteroid();
+
 private:
     // Find nearest interactable object
     int FindNearestAsteroid(const Vec3& playerPos, AsteroidSystem* asteroidSystem);
     int FindNearestPlanet(const Vec3& playerPos, PlanetSystem* planetSystem);
 
     // Actions
-    void ReleaseAsteroid();
 
     // Rendering helpers
     void RenderHighlight(const Vec3& position, float size, const Camera3D& camera,
