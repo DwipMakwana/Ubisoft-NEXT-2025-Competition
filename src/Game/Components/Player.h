@@ -29,11 +29,17 @@ private:
 
 	float r, g, b;  // Color
 
+    float fuel = 100.0f;      // 0-100%
+    float maxFuel = 100.0f;
+    float fuelConsumptionRate = 0.5f;  // Per second at max speed
+
 public:
     Player();
 
     void Init();
     void Update(float deltaTime);
+    void DrawFuelBarWorldSpace(Vec3 playerPos, float fuel, float maxFuel, const Camera3D& camera);
+    void DrawResourceBar(const Vec3& worldPos, float value, const Camera3D& camera, float r, float g, float b);
     void Render(const Camera3D& camera);
 
     // Get aim direction for shooting
@@ -53,6 +59,10 @@ public:
         velocity.y -= force.y;
         velocity.z -= force.z;
     }
+
+    float GetFuel() const { return fuel; }
+    void RefillFuel(float amount);
+    void UpdateFuel(bool isThrusting, float dtSeconds);
 };
 
 #endif

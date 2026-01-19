@@ -1,3 +1,5 @@
+#include "Player.h"
+#include "Player.h"
 //------------------------------------------------------------------------
 // Player.cpp - Free movement implementation
 //------------------------------------------------------------------------
@@ -5,6 +7,8 @@
 #include "../../ContestAPI/App.h"
 #include <cstdio>
 #include <cmath>
+#include <Utilities/WorldText3D.h>
+#include "Planet.h"
 
 Player::Player()
     : position(0.0f, -15.0f, 0.0f)  // Start below Earth
@@ -27,18 +31,26 @@ void Player::Update(float deltaTime) {
 
     // === WASD MOVEMENT ===
     Vec3 inputDir(0.0f, 0.0f, 0.0f);
+    bool isThrusting = false;
+    bool canThrust = (fuel > 0.0f);
 
-    if (App::IsKeyPressed(App::KEY_W)) {
-        inputDir.y += 1.0f;  // Up
-    }
-    if (App::IsKeyPressed(App::KEY_S)) {
-        inputDir.y -= 1.0f;  // Down
-    }
-    if (App::IsKeyPressed(App::KEY_A)) {
-        inputDir.x -= 1.0f;  // Left
-    }
-    if (App::IsKeyPressed(App::KEY_D)) {
-        inputDir.x += 1.0f;  // Right
+    if (canThrust) {
+        if (App::IsKeyPressed(App::KEY_W)) {
+            inputDir.y += 1.0f;  // Up
+            isThrusting = true;
+        }
+        if (App::IsKeyPressed(App::KEY_S)) {
+            inputDir.y -= 1.0f;  // Down
+            isThrusting = true;
+        }
+        if (App::IsKeyPressed(App::KEY_A)) {
+            inputDir.x -= 1.0f;  // Left
+            isThrusting = true;
+        }
+        if (App::IsKeyPressed(App::KEY_D)) {
+            inputDir.x += 1.0f;  // Right
+            isThrusting = true;
+        }
     }
 
     // Normalize diagonal movement
@@ -82,6 +94,8 @@ void Player::Update(float deltaTime) {
     float mouseOffsetX = (mouseX - screenCenterX) / 1024.0f * 80.0f;  // Screen to world scale
     float mouseOffsetY = -(mouseY - screenCenterY) / 768.0f * 60.0f;  // Flip Y, scale
 
+    UpdateFuel(isThrusting, dt);
+
     // World position = player position + mouse offset
     float worldMouseX = position.x + mouseOffsetX;
     float worldMouseY = position.y + mouseOffsetY;
@@ -90,6 +104,73 @@ void Player::Update(float deltaTime) {
     float dx = worldMouseX - position.x;
     float dy = worldMouseY - position.y;
     aimAngle = atan2f(dy, dx) * 180.0f / 3.14159f;
+}
+
+void Player::DrawFuelBarWorldSpace(Vec3 playerPos, float fuel, float maxFuel, const Camera3D& camera)
+{
+    float fuelPct = (maxFuel > 0.0f) ? (fuel / maxFuel) : 0.0f;
+
+    // Position bar to top-right of player (world space offset)
+    Vec3 barWorldPos(playerPos.x + 1.5f, playerPos.y - 2.5f, playerPos.z);  // Offset right+up
+
+    DrawResourceBar(barWorldPos, fuelPct * 100.0f, camera, 0.0f, 1.0f, 0.2f);  // Green
+
+    // Planet-style label ABOVE bar
+    char fuelText[32];
+    snprintf(fuelText, sizeof(fuelText), "Fuel: %.0f%%", fuelPct * 100.0f);
+    Vec3 labelPos = barWorldPos;
+    labelPos.y += 1.2f;  // Above bar
+    WorldText3D::Print(labelPos, fuelText, camera, 1.0f, 1.0f, 1.0f, GLUT_BITMAP_HELVETICA_10);
+}
+
+void Player::RefillFuel(float amount) {
+    fuel += amount;
+    if (fuel > 100.0f) fuel = 100.0f;  // Hard cap
+}
+
+void Player::UpdateFuel(bool isThrusting, float dtSeconds) {
+    if (!isThrusting) return;  // NO COST when coasting/idling
+
+    // Thrust costs 5% per second (full throttle)
+    float thrustCost = 10.0f * dtSeconds;
+    fuel -= thrustCost;
+
+    if (fuel < 0.0f) fuel = 0.0f;
+}
+
+
+void Player::DrawResourceBar(const Vec3& worldPos, float value, const Camera3D& camera, float r, float g, float b)
+{
+    // Bar position slightly below the text
+    Vec3 barPos = worldPos;
+    barPos.y += 0.4f;  // Closer to text
+
+    // Convert to NDC for screen-space bar drawing
+    Vec4 ndc = camera.WorldToNDC(barPos);
+
+    // Check if on screen
+    if (ndc.w < camera.GetNearPlane()) return;
+    if (ndc.x < -1.5f || ndc.x > 1.5f || ndc.y < -1.5f || ndc.y > 1.5f) return;
+
+    // Convert to screen coordinates
+    float screenX = (ndc.x + 1.0f) * (APP_VIRTUAL_WIDTH * 0.5f);
+    float screenY = (ndc.y + 1.0f) * (APP_VIRTUAL_HEIGHT * 0.5f);
+
+    // Bar dimensions (THINNER)
+    float barWidth = 60.0f;
+    float barHeight = 3.0f;  // CHANGED: Thinner (was 6.0f)
+    float fillWidth = (value / 100.0f) * barWidth;
+
+    // Draw filled portion only (NO BACKGROUND)
+    for (float y = 0; y < barHeight; y++) {
+        App::DrawLine(screenX, screenY + y,
+            screenX + fillWidth, screenY + y,
+            r, g, b);
+    }
+
+    // Draw thin border outline
+    //App::DrawLine(screenX, screenY, screenX + barWidth, screenY, 0.4f, 0.4f, 0.4f);  // Bottom
+    App::DrawLine(screenX, screenY + barHeight, screenX + barWidth, screenY + barHeight, 0.4f, 0.4f, 0.4f);  // Top
 }
 
 void Player::Render(const Camera3D& camera) {
@@ -105,6 +186,8 @@ void Player::Render(const Camera3D& camera) {
         camera,
         r, g, b,
         false);
+
+    DrawFuelBarWorldSpace(position, fuel, maxFuel, camera);
 }
 
 Vec3 Player::GetAimDirection() const {
