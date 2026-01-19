@@ -17,8 +17,9 @@
 #include <Utilities/WorldText3D.h>
 #include <Systems/TowingSystem.h>
 #include <UI/UIManager.h>
-#include <Systems/AIShipSystem.h>
+#include <AI/AIShipSystem.h>
 #include <Systems/BulletSystem.h>
+#include <AI/AIPlayerSystem.h>
 
 Camera3D camera3D;
 Player player;
@@ -28,15 +29,18 @@ PlanetSystem planetSystem;
 UIManager uiManager;
 AIShipSystem aiShips;
 BulletSystem bulletSystem;
+AIPlayerSystem aiPlayers;
 
 void Init() {
     srand((unsigned int)time(nullptr));
 
     player.Init();
+
     planetSystem.Init();
 	uiManager.Init();
     bulletSystem.Init();
 
+    aiPlayers.Init(planetSystem);
     aiShips.Init();
 
     asteroidSystem.SetPlanetSystem(&planetSystem);
@@ -79,14 +83,16 @@ void Update(float deltaTime) {
         bulletSystem.ShootBullet(player.GetPosition(), shootDir);
     }
 
-    // Update systems
+    // Update systems IN RIGHT ORDER
     planetSystem.Update(deltaTime, playerPos);
     asteroidSystem.Update(deltaTime, playerPos, &planetSystem);
     starField.Update(playerPos);
     uiManager.Update(deltaTime);
+
+    aiShips.Update(deltaTime, planetSystem, asteroidSystem);  // Ships first
+    aiPlayers.Update(deltaTime, planetSystem, aiShips, bulletSystem);  // Then guards*/
+
     bulletSystem.Update(deltaTime, aiShips, asteroidSystem);
-    aiShips.Update(deltaTime, planetSystem, asteroidSystem);
-    aiShips.ResolveCollisionsWithAsteroids(asteroidSystem);
 
     Vec3 playerPush;
     asteroidSystem.ResolveExternalCollision(player.GetPosition(), 1.2f,
@@ -112,6 +118,7 @@ void Render() {
     player.Render(camera3D);
     aiShips.Render(camera3D, asteroidSystem, planetSystem);
     bulletSystem.Render(camera3D);
+    aiPlayers.Render(camera3D);
 
     // Player position label (world space)
     Vec3 playerPos = player.GetPosition();

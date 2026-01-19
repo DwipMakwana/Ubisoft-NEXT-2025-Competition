@@ -14,13 +14,12 @@ Player::Player()
     , maxSpeed(50.0f)           // INCREASED from 25.0f (way faster)
     , drag(0.98f)
     , size(0.8f)
+	, r(1.0f), g(1.0f), b(1.0f)  // White color
 {
 }
 
 void Player::Init() {
-    mesh = Mesh3D::CreatePyramid(1.0f, 1.5f);
-    printf("Player initialized with FREE MOVEMENT\n");
-    printf("Controls: WASD = Move, Mouse = Aim, Left Click = Shoot\n");
+    mesh = Mesh3D::CreatePyramid(2.0f, 3.0f);
 }
 
 void Player::Update(float deltaTime) {
@@ -104,7 +103,7 @@ void Player::Render(const Camera3D& camera) {
     Renderer3D::DrawMesh(mesh, position, rotation,
         Vec3(size, size, size),
         camera,
-        1.0f, 1.0f, 1.0f,  // White
+        r, g, b,
         false);
 }
 

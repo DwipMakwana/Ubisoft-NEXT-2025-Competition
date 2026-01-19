@@ -260,8 +260,6 @@ void AIShipSystem::OnShipHit(int shipIndex, AsteroidSystem& asteroidSystem) {
     ship.consecutiveHits++;
     ship.hitComboTimer = 2.0f;  // 2s window for combo
 
-    Logger::LogFormat("Ship %d hit! Combo: %d", shipIndex, ship.consecutiveHits);
-
     // 3+ hits = FREEZE ENTIRE PLANET FLEET!
     if (ship.consecutiveHits >= 3) {
         FreezePlanetFleet(ship.parentPlanetIndex);
@@ -318,7 +316,6 @@ void AIShipSystem::FreezePlanetFleet(int planetIndex) {
     if (slot >= 0) {
         frozenPlanets[slot].planetIndex = planetIndex;
         frozenPlanets[slot].freezeTimer = 3.0f;  // 3 second freeze
-        Logger::LogFormat("Planet %d fleet FROZEN for 3s!", planetIndex);
     }
 }
 

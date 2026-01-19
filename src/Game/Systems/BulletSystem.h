@@ -6,7 +6,7 @@
 
 #include "../Utilities/MathUtils3D.h"
 #include "../Rendering/Camera3D.h"
-#include "AIShipSystem.h"
+#include "../AI/AIShipSystem.h"
 
 struct Bullet
 {

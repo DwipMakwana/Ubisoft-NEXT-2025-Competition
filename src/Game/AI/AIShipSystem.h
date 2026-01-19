@@ -58,6 +58,8 @@ public:
     // Add to public section
     void ResolveCollisionsWithAsteroids(AsteroidSystem& asteroidSystem);
 
+    bool IsPlanetFrozen(int planetIndex) const;
+
 private:
     static const int MAX_AI_SHIPS = 84;
 
@@ -71,8 +73,6 @@ private:
     AsteroidMineralType ChooseDesiredMineral(const Planet& planet) const;
     int FindBestAsteroidTarget(const AIShip& ship, const Planet& parent,
         AsteroidSystem& asteroidSystem) const;
-
-    bool IsPlanetFrozen(int planetIndex) const;
 
     void UpdateAI(int shipIndex, AIShip& ship, float dt, PlanetSystem& planetSystem, AsteroidSystem& asteroidSystem);
     void ApplySteering(AIShip& ship, const Vec3& targetPos, float dt, float maxSpeed, float accel);

@@ -27,6 +27,8 @@ private:
     float size;
     Mesh3D mesh;
 
+	float r, g, b;  // Color
+
 public:
     Player();
 
