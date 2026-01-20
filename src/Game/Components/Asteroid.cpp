@@ -35,7 +35,7 @@ AsteroidSystem::AsteroidSystem()
 
 void AsteroidSystem::Init() {
     asteroidMesh = Mesh3D::CreateRock(1.0f, 1);
-    Logger::LogInfo("AsteroidSystem: Initialized (physics-only)");
+    //Logger::LogInfo("AsteroidSystem: Initialized (physics-only)");
 
     // Load initial sectors around origin
     LoadSectorsAroundPlayer(Vec3(0, 0, 0));
@@ -115,7 +115,7 @@ void AsteroidSystem::GenerateSectorAsteroids(int sectorX, int sectorY) {
     for (int n = 0; n < count; n++) {
         int slot = FindFreeSlot();
         if (slot == -1) {
-            Logger::LogWarning("AsteroidSystem: No free asteroid slots!");
+            //Logger::LogWarning("AsteroidSystem: No free asteroid slots!");
             break;
         }
 

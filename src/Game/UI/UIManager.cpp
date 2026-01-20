@@ -16,7 +16,7 @@ void UIManager::Init() {
     texts.clear();
     sprites.clear();
     loadedSprites.clear();
-    Logger::LogInfo("UIManager initialized");
+    //Logger::LogInfo("UIManager initialized");
 }
 
 void UIManager::Shutdown() {
@@ -29,7 +29,7 @@ void UIManager::Shutdown() {
     }
     loadedSprites.clear();
 
-    Logger::LogInfo("UIManager shutdown");
+    //Logger::LogInfo("UIManager shutdown");
 }
 
 void UIManager::Update(float dt) {
@@ -91,13 +91,13 @@ void UIManager::Render() {
 bool UIManager::LoadSprite(const std::string& name, const std::string& filepath,
     int frameColumns, int frameRows) {
     if (loadedSprites.find(name) != loadedSprites.end()) {
-        Logger::LogWarning(("Sprite '" + name + "' already loaded").c_str());
+        //Logger::LogWarning(("Sprite '" + name + "' already loaded").c_str());
         return true;
     }
 
-    Logger::LogFormat("Loading sprite: %s from %s (%dx%d frames = %d total frames)\n",
-        name.c_str(), filepath.c_str(), frameColumns, frameRows,
-        frameColumns * frameRows);
+    //Logger::LogFormat("Loading sprite: %s from %s (%dx%d frames = %d total frames)\n",
+        //name.c_str(), filepath.c_str(), frameColumns, frameRows,
+        //frameColumns * frameRows);
 
     CSimpleSprite* sprite = App::CreateSprite(filepath.c_str(), frameColumns, frameRows);
 
@@ -108,19 +108,11 @@ bool UIManager::LoadSprite(const std::string& name, const std::string& filepath,
         float frameWidth = sprite->GetWidth();
         float frameHeight = sprite->GetHeight();
 
-        Logger::LogFormat("SUCCESS: Loaded sprite '%s'\n", name.c_str());
-        Logger::LogFormat("  - Texture size: %.0fx%.0f pixels\n", frameWidth, frameHeight);
-        Logger::LogFormat("  - Grid: %dx%d frames\n", frameColumns, frameRows);
-        Logger::LogFormat("  - Each frame: %.0fx%.0f pixels\n",
-            frameWidth / frameColumns, frameHeight / frameRows);
-        Logger::LogFormat("  - Total frames: %d (0-%d)\n",
-            frameColumns * frameRows, frameColumns * frameRows - 1);
-
         return true;
     }
     else {
-        Logger::LogFormat("ERROR: Failed to load sprite '%s' from %s\n",
-            name.c_str(), filepath.c_str());
+        //Logger::LogFormat("ERROR: Failed to load sprite '%s' from %s\n",
+            //name.c_str(), filepath.c_str());
         if (sprite) delete sprite;
         return false;
     }
@@ -130,8 +122,8 @@ void UIManager::AddSprite(const std::string& id, const std::string& spriteName,
     float x, float y, float width, float height) {
     auto it = loadedSprites.find(spriteName);
     if (it == loadedSprites.end()) {
-        Logger::LogFormat("ERROR: Cannot add sprite '%s': sprite '%s' not loaded\n",
-            id.c_str(), spriteName.c_str());
+        //Logger::LogFormat("ERROR: Cannot add sprite '%s': sprite '%s' not loaded\n",
+            //id.c_str(), spriteName.c_str());
         return;
     }
 
@@ -144,8 +136,8 @@ void UIManager::AddSprite(const std::string& id, const std::string& spriteName,
 
     sprites[id] = newSprite;
 
-    Logger::LogFormat("Added sprite '%s' at (%.1f, %.1f) size %.1fx%.1f\n",
-        id.c_str(), x, y, width, height);
+    //Logger::LogFormat("Added sprite '%s' at (%.1f, %.1f) size %.1fx%.1f\n",
+        //id.c_str(), x, y, width, height);
 }
 
 void UIManager::RemoveSprite(const std::string& id) {
@@ -216,17 +208,17 @@ void UIManager::PlaySpriteAnimation(const std::string& id, int startFrame, int e
             frames.push_back(i);
         }
 
-        Logger::LogFormat("Creating animation for '%s': %d frames (", id.c_str(), (int)frames.size());
+        //Logger::LogFormat("Creating animation for '%s': %d frames (", id.c_str(), (int)frames.size());
         for (int f : frames) {
             Logger::LogFormat("%d ", f);
         }
-        Logger::LogLine(")");
+        //Logger::LogLine(")");
 
         // Create animation (ID 0, speed in seconds per frame, frame list)
         it->second.sprite->CreateAnimation(0, speed, frames);
         it->second.sprite->SetAnimation(0, true);  // Play from beginning
 
-        Logger::LogFormat("Animation started for '%s'\n", id.c_str());
+        //Logger::LogFormat("Animation started for '%s'\n", id.c_str());
     }
 }
 

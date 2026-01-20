@@ -238,7 +238,7 @@ void PlanetSystem::GenerateSectorPlanet(int sectorX, int sectorY) {
     }
 
     if (slot == -1) {
-        Logger::LogWarning("No free planet slots!");
+        //Logger::LogWarning("No free planet slots!");
         srand(oldSeed);
         return;
     }

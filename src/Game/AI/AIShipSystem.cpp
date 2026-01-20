@@ -15,7 +15,7 @@ AIShipSystem::AIShipSystem()
 
 void AIShipSystem::Init()
 {
-    Logger::LogInfo("AIShipSystem: Initialized");
+    //Logger::LogInfo("AIShipSystem: Initialized");
 }
 
 void AIShipSystem::Update(float deltaTime, PlanetSystem& planetSystem, AsteroidSystem& asteroidSystem)

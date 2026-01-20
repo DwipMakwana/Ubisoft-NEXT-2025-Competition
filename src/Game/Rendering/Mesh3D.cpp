@@ -29,7 +29,7 @@ bool Mesh3D::LoadFromOBJ(const std::string& filename) {
 
     std::ifstream file(filename);
     if (!file.is_open()) {
-        Logger::LogFormat("ERROR: Could not open OBJ file: %s\n", filename.c_str());
+        //Logger::LogFormat("ERROR: Could not open OBJ file: %s\n", filename.c_str());
         return false;
     }
 
@@ -39,7 +39,7 @@ bool Mesh3D::LoadFromOBJ(const std::string& filename) {
     std::string line;
     int lineNum = 0;
 
-    Logger::LogFormat("Loading OBJ: %s\n", filename.c_str());
+    //Logger::LogFormat("Loading OBJ: %s\n", filename.c_str());
 
     while (std::getline(file, line)) {
         lineNum++;
@@ -114,8 +114,8 @@ bool Mesh3D::LoadFromOBJ(const std::string& filename) {
     }
     file.close();
 
-    Logger::LogFormat("  Parsed: %d positions, %d normals, %d faces\n",
-        (int)tempPositions.size(), (int)tempNormals.size(), (int)faces.size());
+    //Logger::LogFormat("  Parsed: %d positions, %d normals, %d faces\n",
+        //(int)tempPositions.size(), (int)tempNormals.size(), (int)faces.size());
 
     // Build vertex array from faces
     for (const auto& face : faces) {
@@ -141,7 +141,7 @@ bool Mesh3D::LoadFromOBJ(const std::string& filename) {
     }
 
     // Fix winding order - OBJ files use opposite convention
-    Logger::LogLine("  Fixing winding order for back-face culling...");
+    //Logger::LogLine("  Fixing winding order for back-face culling...");
     for (size_t i = 0; i < vertices.size(); i += 3) {
         if (i + 2 < vertices.size()) {
             std::swap(vertices[i + 1], vertices[i + 2]);
@@ -150,18 +150,18 @@ bool Mesh3D::LoadFromOBJ(const std::string& filename) {
 
     // If no normals, calculate them
     if (tempNormals.empty()) {
-        Logger::LogLine("  No normals found, calculating...");
+        //Logger::LogLine("  No normals found, calculating...");
         CalculateNormals();
     }
 
     CalculateBounds();
 
-    Logger::LogFormat("  Loaded: %d vertices, %d faces\n", GetVertexCount(), GetFaceCount());
-    Logger::LogFormat("  Bounds: (%.2f, %.2f, %.2f) to (%.2f, %.2f, %.2f)\n",
-        boundsMin.x, boundsMin.y, boundsMin.z,
-        boundsMax.x, boundsMax.y, boundsMax.z);
-    Logger::LogFormat("  Center: (%.2f, %.2f, %.2f)\n",
-        center.x, center.y, center.z);
+    //Logger::LogFormat("  Loaded: %d vertices, %d faces\n", GetVertexCount(), GetFaceCount());
+    //Logger::LogFormat("  Bounds: (%.2f, %.2f, %.2f) to (%.2f, %.2f, %.2f)\n",
+        //boundsMin.x, boundsMin.y, boundsMin.z,
+        //boundsMax.x, boundsMax.y, boundsMax.z);
+    //Logger::LogFormat("  Center: (%.2f, %.2f, %.2f)\n",
+        //center.x, center.y, center.z);
 
     return true;
 }

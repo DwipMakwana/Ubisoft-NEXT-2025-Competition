@@ -20,6 +20,7 @@
 #include <AI/AIShipSystem.h>
 #include <Systems/BulletSystem.h>
 #include <AI/AIPlayerSystem.h>
+#include "GameState.h"
 
 Camera3D camera3D;
 Player player;
@@ -31,8 +32,12 @@ AIShipSystem aiShips;
 BulletSystem bulletSystem;
 AIPlayerSystem aiPlayers;
 
+int playerHomePlanet = 0;
+
 void Init() {
     srand((unsigned int)time(nullptr));
+
+    GameState_Init();
 
     player.Init();
 
@@ -55,6 +60,12 @@ void Init() {
 
 void Update(float deltaTime) {
     float dt = deltaTime / 1000.0f;
+
+    GameState_HandleInput();
+    GameState_Update(deltaTime);
+
+    if (gamePaused)
+		return;
 
     player.Update(deltaTime);
 
@@ -79,8 +90,8 @@ void Update(float deltaTime) {
     // SHOOT (Left Click)
     if (App::IsKeyPressed(App::KEY_SPACE))
     {
-        Vec3 shootDir = player.GetAimDirection();  // Uses rotation!
-        bulletSystem.ShootBullet(player.GetPosition(), shootDir);
+        Vec3 shootDir = player.GetAimDirection();
+        bulletSystem.ShootBullet(player.GetPosition(), shootDir, playerHomePlanet);
     }
 
     // Update systems IN RIGHT ORDER
@@ -92,7 +103,7 @@ void Update(float deltaTime) {
     aiShips.Update(deltaTime, planetSystem, asteroidSystem);  // Ships first
     aiPlayers.Update(deltaTime, planetSystem, aiShips, bulletSystem);  // Then guards*/
 
-    bulletSystem.Update(deltaTime, aiShips, asteroidSystem);
+    bulletSystem.Update(deltaTime, &aiShips, &aiPlayers, &asteroidSystem, &planetSystem);
 
     Vec3 playerPush;
     asteroidSystem.ResolveExternalCollision(player.GetPosition(), 1.2f,
@@ -120,18 +131,21 @@ void Render() {
     bulletSystem.Render(camera3D);
     aiPlayers.Render(camera3D);
 
-    // Player position label (world space)
-    Vec3 playerPos = player.GetPosition();
+    //// Player position label (world space)
+    //Vec3 playerPos = player.GetPosition();
 
-    char posText[64];
-    sprintf(posText, "Position: X:%.1f Y:%.1f", playerPos.x, playerPos.y);
+    //char posText[64];
+    //sprintf(posText, "Position: X:%.1f Y:%.1f", playerPos.x, playerPos.y);
 
-    uiManager.AddText("player_pos", 10.0f, 720.0f, posText,
-        1.0f, 1.0f, 0.3f, GLUT_BITMAP_HELVETICA_12);
+    //uiManager.AddText("player_pos", 10.0f, 720.0f, posText,
+    //    1.0f, 1.0f, 0.3f, GLUT_BITMAP_HELVETICA_12);
 
     uiManager.Render();
+
+    GameState_Render(camera3D);
 }
 
 void Shutdown() {
+    uiManager.Shutdown();
     Logger::LogInfo("Shutdown");
 }

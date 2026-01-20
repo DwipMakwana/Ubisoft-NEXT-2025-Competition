@@ -6,7 +6,11 @@
 
 #include "../Utilities/MathUtils3D.h"
 #include "../Rendering/Camera3D.h"
-#include "../AI/AIShipSystem.h"
+#include "../Components/Planet.h"
+
+class AIShipSystem;
+class AIPlayerSystem;
+class AsteroidSystem;
 
 struct Bullet
 {
@@ -16,6 +20,7 @@ struct Bullet
     float lifetime = 0.0f;
     float maxLifetime = 2.0f;  // 2 seconds before despawn
     float radius = 0.3f;
+    int killerHomePlanetIndex = 0;
 };
 
 class BulletSystem
@@ -24,19 +29,21 @@ public:
     BulletSystem();
 
     void Init();
-    void Update(float deltaTime, AIShipSystem& aiShips, AsteroidSystem& asteroidSystem);
+    void Update(float deltaTime, AIShipSystem* aiShips, AIPlayerSystem* aiPlayers,
+        AsteroidSystem* asteroidSystem, PlanetSystem* planetSystem);
     void Render(const Camera3D& camera);
 
     // Shooting
-    void ShootBullet(const Vec3& playerPos, const Vec3& direction);
+    void ShootBullet(const Vec3& playerPos, const Vec3& direction, int playerHomePlanet);
 
 private:
-    static const int MAX_BULLETS = 100;
+    static const int MAX_BULLETS = 1000;
     Bullet bullets[MAX_BULLETS];
 
     // Helpers
     int FindFreeBullet();
-    void CheckCollisions(AIShipSystem& aiShips, AsteroidSystem& asteroidSystem);
+    void CheckCollisions(AIShipSystem* aiShips, AIPlayerSystem* aiPlayers,
+        AsteroidSystem* asteroidSystem, PlanetSystem* planetSystem);
 
     float fireRateCooldown = 0.0f;
     float fireRateInterval = 0.15f;

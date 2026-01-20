@@ -14,8 +14,8 @@ struct AIPlayer {
     float aimAngle;
     Mesh3D mesh;
     float size = 0.8f;
-    float maxSpeed = 35.0f;
-    float drag = 0.98f;
+    float maxSpeed = 120.0f;
+    float drag = 0.995f;
 
     // AI state
     int homePlanetIndex = 0;
@@ -25,10 +25,12 @@ struct AIPlayer {
     Vec3 patrolTarget;
     bool active = false;
 
-    float health = 100.0f;
-
     // Colors
     float r = 1.0f, g = 1.0f, b = 1.0f;
+
+    float health = 100.0f;
+    int consecutiveHits = 0;
+    float hitComboTimer = 0.0f;
 };
 
 class AIPlayerSystem {
@@ -39,7 +41,7 @@ public:
     void Update(float deltaTime, PlanetSystem& planetSystem, AIShipSystem& enemyShips, BulletSystem& bullets);
     void Render(const Camera3D& camera);
 
-    void OnPlayerHit(int playerIndex);
+    void OnPlayerHit(int playerIndex, AsteroidSystem* asteroidSystem, PlanetSystem* planetSystem, int killerHomePlanet);
     AIPlayer* GetPlayers() { return players; }
     int GetMaxPlayers() const { return MAX_AIPLAYERS; }
 
@@ -47,9 +49,13 @@ private:
     static const int MAX_AIPLAYERS = 8;
     AIPlayer players[MAX_AIPLAYERS];
 
+    void ApplyAISteering(AIPlayer* player, const Vec3 targetPos, float dt,
+        float maxSpeed, float accel, bool updatePosition = true);
+
     int FindFreePlayer();
     int FindNearestEnemyShip(const Vec3& pos, int myHomePlanetIndex, AIShipSystem& enemyShips);
-    void UpdateAI(int index, float dt, PlanetSystem& planetSystem, AIShipSystem& enemyShips, BulletSystem& bullets);
+    void UpdateAI(int index, float dt, PlanetSystem planetSystem,
+        AIShipSystem enemyShips, BulletSystem bullets);
 };
 
 #endif

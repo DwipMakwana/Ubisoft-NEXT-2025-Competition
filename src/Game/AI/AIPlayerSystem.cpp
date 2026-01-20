@@ -26,19 +26,21 @@ void AIPlayerSystem::Update(float deltaTime, PlanetSystem& planetSystem,
     for (int i = 0; i < MAX_AIPLAYERS; i++) {
         if (!players[i].active) continue;
 
-        UpdateAI(i, dt, planetSystem, enemyShips, bullets); // pass seconds now
+        UpdateAI(i, dt, planetSystem, enemyShips, bullets);
 
-        // Drag (frame-rate independent-ish)
+        // Drag (frame-rate independent-ish) - LOWER drag value = LESS drag = FASTER
         players[i].velocity.x *= powf(players[i].drag, dt * 60.0f);
         players[i].velocity.y *= powf(players[i].drag, dt * 60.0f);
 
-        // Clamp speed
+        // REMOVE speed clamp temporarily for max speed - guards go FAST
+        /*
         float speed = sqrtf(players[i].velocity.x * players[i].velocity.x +
             players[i].velocity.y * players[i].velocity.y);
         if (speed > players[i].maxSpeed && speed > 0.0001f) {
             players[i].velocity.x = (players[i].velocity.x / speed) * players[i].maxSpeed;
             players[i].velocity.y = (players[i].velocity.y / speed) * players[i].maxSpeed;
         }
+        */
 
         // Integrate with seconds
         players[i].position.x += players[i].velocity.x * dt;
@@ -75,15 +77,9 @@ void AIPlayerSystem::SpawnForActivePlanets(PlanetSystem& planetSystem) {
             if (slot == -1) break;
 
             // Planet color (computed like AIShips)
-            float avgResource = planetAvg;
-            float hue = avgResource * 300.0f;
-            float h = fmodf(hue / 60.0f, 6.0f);
-            float s = 0.8f - avgResource * 0.2f;
-            float v = 0.6f + avgResource * 0.4f;
-            // HSV → RGB (copy from AIShipSystem::SpawnShip)
-            float c = v * s, x = c * (1 - fabsf(fmodf(h, 2.0f) - 1));
-            float m = v - c;
-            // ... set players[slot].r,g,b ...
+            players[slot].r = planets[p].r;
+            players[slot].g = planets[p].g;
+            players[slot].b = planets[p].b;
 
             // Bottom spawn around THIS planet
             float angle = (needed * 2.0944f) + 4.71239f;  // 120° spacing, bottom
@@ -94,114 +90,102 @@ void AIPlayerSystem::SpawnForActivePlanets(PlanetSystem& planetSystem) {
             players[slot].mesh = Mesh3D::CreatePyramid(2.0f, 3.0f);
             players[slot].homePlanetIndex = p;
             players[slot].active = true;
-
-			players[slot].r = planets[p].r;
-			players[slot].g = planets[p].g;
-			players[slot].b = planets[p].b;
+            players[slot].velocity = Vec3(0, 0, 0);
+            players[slot].maxSpeed = 180.0f;        // *** HIGH SPEED ***
+            players[slot].drag = 0.985f;            // *** LOW DRAG = FAST ***
+            players[slot].size = 1.0f;              // Larger & visible
+            players[slot].shootCooldown = 0.0f;
+            players[slot].aimAngle = 0.0f;
+            players[slot].health = 100.0f;
         }
     }
 }
 
-void AIPlayerSystem::UpdateAI(int index, float dt, PlanetSystem& planetSystem,
-    AIShipSystem& enemyShips, BulletSystem& bullets) {
+void AIPlayerSystem::UpdateAI(int index, float dt, PlanetSystem planetSystem,
+    AIShipSystem enemyShips, BulletSystem bullets) {
     AIPlayer& player = players[index];
     const Planet* planets = planetSystem.GetPlanets();
     const AIShip* ships = enemyShips.GetShips();
 
-    if (player.targetShipIndex >= 0) {
-        const AIShip& target = ships[player.targetShipIndex];
-
-        // Aim
-        Vec3 toTarget = target.position - player.position;
-        float dist = sqrtf(toTarget.x * toTarget.x + toTarget.y * toTarget.y);
-        toTarget.x /= dist; toTarget.y /= dist;
-        player.aimAngle = atan2f(toTarget.y, toTarget.x) * 180.0f / 3.14159f;
-
-        // SHOOT LOGIC - BULLETSYSTEM.SHOOTBULLET
-        if (player.shootCooldown <= 0.0f && dist < 120.0f) {  // Range check
-            float aimRad = player.aimAngle * 3.14159f / 180.0f;
-            Vec3 aimDir(cosf(aimRad), sinf(aimRad), 0.0f);
-            bullets.ShootBullet(player.position, aimDir);
-            player.shootCooldown = 0.15f;  // 6 shots/sec
-        }
-    }
-
-    // SCAN FOR NEW TARGETS frequently
-    if (player.targetShipIndex < 0 || player.retargetTimer <= 0) {
+    player.retargetTimer -= dt;
+    if (player.retargetTimer <= 0) {
         player.targetShipIndex = FindNearestEnemyShip(player.position, player.homePlanetIndex, enemyShips);
-        player.retargetTimer = 0.3f;  // SHORT 0.3s scan cycle
+        player.retargetTimer = 0.1f;
     }
 
-    if (player.targetShipIndex >= 0 && ships[player.targetShipIndex].active) {
-        const AIShip& target = ships[player.targetShipIndex];
+    Vec3 targetPos;
+    bool hasTarget = (player.targetShipIndex >= 0 && player.targetShipIndex < enemyShips.GetMaxShips() && ships[player.targetShipIndex].active);
 
-        // Aim
-        Vec3 targetDelta(target.position.x - player.position.x,
-            target.position.y - player.position.y, 0);
-        float len = sqrtf(targetDelta.x * targetDelta.x + targetDelta.y * targetDelta.y);
-        if (len > 0.001f) {
-            Vec3 targetDir(targetDelta.x / len, targetDelta.y / len, 0);
-            player.aimAngle = atan2f(targetDir.y, targetDir.x) * 180.0f / 3.14159f;
-        }
+    if (hasTarget) {
+        const AIShip& targetShip = ships[player.targetShipIndex];
+        targetPos = Vec3(targetShip.position.x, targetShip.position.y, 0);
 
-        // SHOOT BURST - PER GUARD counter
-        static int burstCount[MAX_AIPLAYERS] = {};  // FIXED: per-guard!
-        if (player.shootCooldown <= 0 && burstCount[index] < 3) {
+        // *** STEER BUT NO POSITION INTEGRATION ***
+        ApplyAISteering(&player, targetPos, dt, 140.0f, 80.0f);  // false = no position update
+
+        float dist = (targetPos - player.position).Length();
+
+        // *** PREDICTIVE AIM ***
+        Vec3 predTarget = targetPos + Vec3(targetShip.velocity.x * 0.5f, targetShip.velocity.y * 0.5f, 0);
+        player.aimAngle = atan2f(predTarget.y - player.position.y, predTarget.x - player.position.x) * 180.0f / 3.14159f;
+
+        if (player.shootCooldown <= 0.0f && dist <= 180.0f) {
             float aimRad = player.aimAngle * 3.14159f / 180.0f;
-            Vec3 aimDir(cosf(aimRad), sinf(aimRad), 0.0f);
-            bullets.ShootBullet(player.position, aimDir);
-            player.shootCooldown = 0.15f;  // Seconds
-            burstCount[index]++;
-        }
-        else if (burstCount[index] >= 3) {
-            player.shootCooldown = 2.0f;  // 2s cooldown
-            burstCount[index] = 0;
-        }
-
-        // Steering (seconds-tuned)
-
-        // In targeting block - bigger engage range
-        float dx = target.position.x - player.position.x;
-        float dy = target.position.y - player.position.y;
-        float distSq = dx * dx + dy * dy;
-        if (distSq > 16000.0f) {  // 126u vs 80u - chase farther!
-            player.targetShipIndex = -1;
-            player.retargetTimer = 0.1f;  // Instant rescan
-            return;
+            Vec3 aimDir(cosf(aimRad), sinf(aimRad), 0);
+            bullets.ShootBullet(player.position, aimDir, player.homePlanetIndex);  // *** 3 ARGS ***
+            player.shootCooldown = 0.08f;
+            //Logger::LogFormat("GUARD %d SHOOTS ship %d (dist %.1f)", index, player.targetShipIndex, dist);
         }
     }
     else {
-        // STRONGER PATROL ORBIT - copy AIShip idle logic [file:5]
         const Planet& home = planets[player.homePlanetIndex];
+        float orbitAngle = fmodf(home.currentRotation * 0.017f + dt * 0.3f, 6.283f);
+        targetPos = Vec3(home.position.x + cosf(orbitAngle) * (home.size + 35.0f),
+            home.position.y + sinf(orbitAngle) * (home.size + 35.0f), 0);
+        ApplyAISteering(&player, targetPos, dt, 100.0f, 50.0f);  // *** NO DOUBLE POS ***
+    }
 
-        // Orbit using planet rotation + time
-        float orbitAngle = fmodf(home.currentRotation * 0.0174533f + dt * 0.5f, 6.28318f);
-        Vec3 patrolTarget(home.position.x + cosf(orbitAngle) * (home.size + 22.0f),
-            home.position.y + sinf(orbitAngle) * (home.size + 22.0f), 0);
+    player.shootCooldown -= dt;
+}
 
-        Vec3 toPatrol(patrolTarget.x - player.position.x,
-            patrolTarget.y - player.position.y, 0);
-        float patrolDist = sqrtf(toPatrol.x * toPatrol.x + toPatrol.y * toPatrol.y);
+void AIPlayerSystem::ApplyAISteering(AIPlayer* player, const Vec3 targetPos, float dt,
+    float maxSpeed, float accel, bool updatePosition)
+{
+    Vec3 toTarget(targetPos - player->position);
+    float len = toTarget.Length();
+    if (len < 12.0f) return;  // *** STOP AT 12u - NO OVERSHOOT ***
 
-        if (patrolDist > 1.0f) {
-            toPatrol.x /= patrolDist;
-            toPatrol.y /= patrolDist;
+    Vec3 desiredVel(toTarget.x / len, toTarget.y / len, toTarget.z / len);
+    desiredVel.x *= maxSpeed;
+    desiredVel.y *= maxSpeed;
+    desiredVel.z *= maxSpeed;
 
-            // STRONG STEERING like AIShip ApplySteering
-            player.velocity.x += toPatrol.x * 20.0f * dt;
-            player.velocity.y += toPatrol.y * 20.0f * dt;
-        }
+    Vec3 dv(desiredVel.x - player->velocity.x,
+        desiredVel.y - player->velocity.y,
+        desiredVel.z - player->velocity.z);
 
-        // Idle spin
-        player.aimAngle += dt * 60.0f;
+    float dvLen = dv.Length();
+    if (dvLen > accel * dt && dvLen > 0.001f) {
+        dv.x *= (accel * dt) / dvLen;
+        dv.y *= (accel * dt) / dvLen;
+        dv.z *= (accel * dt) / dvLen;
+    }
 
-        // FORCE minimum speed if stopped
-        float speedSq = player.velocity.x * player.velocity.x + player.velocity.y * player.velocity.y;
-        if (speedSq < 1.0f) {
-            float nudgeAngle = dt * 2.0f;
-            player.velocity.x += cosf(nudgeAngle) * 8.0f * dt;
-            player.velocity.y += sinf(nudgeAngle) * 8.0f * dt;
-        }
+    player->velocity.x += dv.x;
+    player->velocity.y += dv.y;
+    player->velocity.z += dv.z;
+
+    // *** OPTIONAL POSITION UPDATE ***
+    if (updatePosition) {
+        player->position.x += player->velocity.x * dt;
+        player->position.y += player->velocity.y * dt;
+        player->position.z += player->velocity.z * dt;
+    }
+
+    // Aim toward velocity
+    if (player->velocity.LengthSquared() > 0.01f) {
+        Vec3 velDir = player->velocity.Normalized();
+        player->aimAngle = atan2f(velDir.y, velDir.x) * 180.0f / 3.14159f;
     }
 }
 
@@ -219,11 +203,10 @@ int AIPlayerSystem::FindNearestEnemyShip(const Vec3& pos, int myHomePlanetIndex,
         if (!ships[i].active) continue;
 
         int shipPlanet = ships[i].parentPlanetIndex;
-        Logger::LogFormat("Ship%d planet=%d", i, shipPlanet);
 
-        // BULLETPROOF: Skip own + Home + invalid
-        if (shipPlanet == myHomePlanetIndex || shipPlanet == 0 || shipPlanet < 0) {
-            Logger::LogFormat("Ship%d SKIPPED (planet=%d)", i, shipPlanet);
+        // *** FIXED: Skip OWN planet + ALL HOME PLANET SHIPS (0) ***
+        if (shipPlanet == myHomePlanetIndex || shipPlanet == 0) {
+            //Logger::LogFormat("Guard SKIP ship %d (planet=%d)", i, shipPlanet);
             continue;
         }
 
@@ -231,29 +214,24 @@ int AIPlayerSystem::FindNearestEnemyShip(const Vec3& pos, int myHomePlanetIndex,
         float dy = ships[i].position.y - pos.y;
         float distSq = dx * dx + dy * dy;
 
-        // PRIORITY 1: Enemy Guards (non-Home workers)
-        if (shipPlanet != 0) {  // Assume guards have planet != 0
+        if (shipPlanet > 0) {  // Enemy planet ships = priority guards
             if (distSq < bestGuardDistSq) {
                 bestGuardDistSq = distSq;
                 bestGuardIdx = i;
-                Logger::LogFormat("New best GUARD: %d dist=%.1f", i, sqrtf(distSq));
             }
         }
-        // PRIORITY 2: Enemy Workers (any non-Home)
-        else {
-            if (distSq < bestWorkerDistSq) {
-                bestWorkerDistSq = distSq;
-                bestWorkerIdx = i;
-                Logger::LogFormat("New best WORKER: %d dist=%.1f", i, sqrtf(distSq));
-            }
+        else if (distSq < bestWorkerDistSq) {
+            bestWorkerDistSq = distSq;
+            bestWorkerIdx = i;
         }
     }
 
-    // Return guards first, then workers
-    int target = (bestGuardIdx != -1 && bestGuardDistSq < 4000.0f) ? bestGuardIdx : bestWorkerIdx;
-    if (target != -1 && bestWorkerDistSq < 4000.0f) target = bestWorkerIdx;
+    int target = (bestGuardIdx != -1 && bestGuardDistSq < 40000.0f) ? bestGuardIdx :
+        (bestWorkerIdx != -1 && bestWorkerDistSq < 40000.0f) ? bestWorkerIdx : -1;
 
-    Logger::LogFormat("FINAL target=%d", target);
+    //Logger::LogFormat("GUARD target=%d (guard %.1f, worker %.1f)", target,
+        //bestGuardIdx != -1 ? sqrtf(bestGuardDistSq) : -1.0f,
+        //bestWorkerIdx != -1 ? sqrtf(bestWorkerDistSq) : -1.0f);
     return target;
 }
 
@@ -269,18 +247,55 @@ void AIPlayerSystem::Render(const Camera3D& camera) {
     }
 }
 
-void AIPlayerSystem::OnPlayerHit(int playerIndex) {
+void AIPlayerSystem::OnPlayerHit(int playerIndex, AsteroidSystem* asteroidSystem,
+    PlanetSystem* planetSystem, int killerHomePlanet) {
     if (playerIndex < 0 || playerIndex >= MAX_AIPLAYERS) return;
     AIPlayer& player = players[playerIndex];
     if (!player.active) return;
 
-    player.health -= 25.0f;  // Matches ship damage per hit
-    Logger::LogFormat("AIPlayer %d hit! Health: %.0f", playerIndex, player.health);
+    player.health -= 25.0f;  // Identical ship damage
+    player.consecutiveHits++;  // Combo counter
+    player.hitComboTimer = 2.0f;  // 2s window
+
+    //Logger::LogFormat("AIPlayer %d hit! Health: %.0f", playerIndex, player.health);
+
+    if (player.hitComboTimer <= 0.0f) {
+        player.consecutiveHits = 0;  // Reset if no hits in 2s
+    }
 
     if (player.health <= 0.0f) {
+
+        // DEAD: Lose 10% from victim's planet
+        int victimPlanet = player.homePlanetIndex;
+        Planet& victimP = planetSystem->GetPlanets()[victimPlanet];
+        float stolen = 0.10f;  // 10%
+        victimP.ironLevel *= (1.0f - stolen);
+        victimP.waterLevel *= (1.0f - stolen);
+        victimP.carbonLevel *= (1.0f - stolen);
+        victimP.energyLevel *= (1.0f - stolen);
+        //Logger::LogFormat("Victim Planet %d loses 10%% resources", victimPlanet);
+
+        // KILLER: Gain 20% of stolen (double reward)
+        Planet& killerP = planetSystem->GetPlanets()[killerHomePlanet];
+        float reward = stolen * 0.20f;
+        killerP.ironLevel += reward * 100.0f;    // Scale to 0-100 range
+        killerP.waterLevel += reward * 100.0f;
+        killerP.carbonLevel += reward * 100.0f;
+        killerP.energyLevel += reward * 100.0f;
+        killerP.ironLevel = fminf(killerP.ironLevel, 100.0f);
+        killerP.waterLevel = fminf(killerP.waterLevel, 100.0f);
+        killerP.carbonLevel = fminf(killerP.carbonLevel, 100.0f);
+        killerP.energyLevel = fminf(killerP.energyLevel, 100.0f);
+        //Logger::LogFormat("Killer Planet %d gains %.1f%% resources", killerHomePlanet, reward * 100);
+
+        // *** PLAYER REFUEL ONLY if killer is HOME (us) ***
+        if (killerHomePlanet == 0) {  // Player home planet
+            extern Player player;  // GameTest global ref
+            player.RefillFuel(25.0f);
+            Logger::LogFormat("PLAYER REFUELED +25 fuel! (guard %d)", playerIndex);
+        }
+
         player.active = false;
-        Logger::LogFormat("AIPlayer %d destroyed!", playerIndex);
-        // Optional: ParticleSystem3D::EmitExplosion(player.position, 20);
+        Logger::LogFormat("AIPlayer %d DESTROYED!", playerIndex);
     }
 }
-

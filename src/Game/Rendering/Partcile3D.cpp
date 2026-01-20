@@ -24,7 +24,7 @@ ParticleSystem3D::ParticleSystem3D(int maxPart)
     , useGravity(true)
 {
     particles.resize(maxParticles);
-    Logger::LogFormat("ParticleSystem3D created with %d max particles\n", maxParticles);
+    //Logger::LogFormat("ParticleSystem3D created with %d max particles\n", maxParticles);
 }
 
 void ParticleSystem3D::Update(float deltaTime) {
@@ -162,13 +162,13 @@ void ParticleSystem3D::Emit(const Vec3& position, int count) {
 }
 
 void ParticleSystem3D::EmitExplosion(const Vec3& position, int count) {
-    Logger::LogFormat("EXPLOSION: %d particles at (%.2f, %.2f, %.2f)\n",
-        count, position.x, position.y, position.z);
+    //Logger::LogFormat("EXPLOSION: %d particles at (%.2f, %.2f, %.2f)\n",
+        //count, position.x, position.y, position.z);
 
     for (int i = 0; i < count; i++) {
         int index = FindInactiveParticle();
         if (index < 0) {
-            Logger::LogLine("WARNING: No inactive particles available!");
+            //Logger::LogLine("WARNING: No inactive particles available!");
             break;
         }
 
@@ -190,7 +190,7 @@ void ParticleSystem3D::EmitExplosion(const Vec3& position, int count) {
         p.size = startSize;
     }
     
-    Logger::LogFormat("Explosion complete. Active: %d\n", GetActiveCount());
+    //Logger::LogFormat("Explosion complete. Active: %d\n", GetActiveCount());
 }
 
 void ParticleSystem3D::EmitContinuous(const Vec3& position, float rate, float deltaTime) {
