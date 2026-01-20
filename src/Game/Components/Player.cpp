@@ -1,5 +1,6 @@
 #include "Player.h"
 #include "Player.h"
+#include "Player.h"
 //------------------------------------------------------------------------
 // Player.cpp - Free movement implementation
 //------------------------------------------------------------------------
@@ -9,6 +10,7 @@
 #include <cmath>
 #include <Utilities/WorldText3D.h>
 #include "Planet.h"
+#include <Utilities/Logger.h>
 
 Player::Player()
     : position(0.0f, -15.0f, 0.0f)  // Start below Earth
@@ -26,8 +28,53 @@ void Player::Init() {
     mesh = Mesh3D::CreatePyramid(2.0f, 3.0f);
 }
 
+void Player::TakeDamage(float damage) {
+    if (isDead) return;  // Can't damage a dead player
+
+    health -= damage;
+    Logger::LogFormat("Player took %.0f damage! Health: %.0f/%.0f\n", damage, health, maxHealth);
+
+    if (health <= 0.0f) {
+        health = 0.0f;
+        Die();
+    }
+}
+
+void Player::Die() {
+    isDead = true;
+    respawnTimer = respawnDelay;
+    velocity = Vec3(0, 0, 0);  // Stop moving
+    Logger::LogInfo("PLAYER DIED! Respawning in 3 seconds...");
+}
+
+void Player::Respawn() {
+    isDead = false;
+    health = maxHealth;
+    fuel = maxFuel;
+    position = Vec3(0, -15.0f, 0.0f);  // Reset to spawn position
+    velocity = Vec3(0, 0, 0);
+    Logger::LogInfo("Player respawned!");
+}
+
+void Player::UpdateRespawn(float deltaTime) {
+    if (!isDead) return;
+
+    float dt = deltaTime / 1000.0f;
+    respawnTimer -= dt;
+
+    if (respawnTimer <= 0.0f) {
+        Respawn();
+    }
+}
+
 void Player::Update(float deltaTime) {
     float dt = deltaTime / 1000.0f;
+
+    // Handle respawn countdown
+    if (isDead) {
+        UpdateRespawn(deltaTime);
+        return;  // Skip all other updates while dead
+    }
 
     // === WASD MOVEMENT ===
     Vec3 inputDir(0.0f, 0.0f, 0.0f);
@@ -113,7 +160,7 @@ void Player::DrawFuelBarWorldSpace(Vec3 playerPos, float fuel, float maxFuel, co
     // Position bar to top-right of player (world space offset)
     Vec3 barWorldPos(playerPos.x + 1.5f, playerPos.y - 2.5f, playerPos.z);  // Offset right+up
 
-    DrawResourceBar(barWorldPos, fuelPct * 100.0f, camera, 0.0f, 1.0f, 0.2f);  // Green
+    DrawResourceBar(barWorldPos, fuelPct * 100.0f, camera, 1.0f, 1.0f, 0.0f);  // Yellow
 
     // Planet-style label ABOVE bar
     char fuelText[32];
@@ -121,6 +168,23 @@ void Player::DrawFuelBarWorldSpace(Vec3 playerPos, float fuel, float maxFuel, co
     Vec3 labelPos = barWorldPos;
     labelPos.y += 1.2f;  // Above bar
     WorldText3D::Print(labelPos, fuelText, camera, 1.0f, 1.0f, 1.0f, GLUT_BITMAP_HELVETICA_10);
+}
+
+void Player::DrawHealthBarWorldSpace(Vec3 playerPos, float health, float maxHealth, const Camera3D& camera)
+{
+    float healthPct = (maxHealth > 0.0f) ? (health / maxHealth) : 0.0f;
+
+    // Position bar to TOP-LEFT of player (mirrored from fuel)
+    Vec3 barWorldPos(playerPos.x - 6.5f, playerPos.y - 2.5f, playerPos.z);  // LEFT side (negative x)
+
+    DrawResourceBar(barWorldPos, healthPct * 100.0f, camera, 0.0f, 1.0f, 0.0f);  // Red
+
+    // Label ABOVE bar
+    char healthText[32];
+    snprintf(healthText, sizeof(healthText), "Health: %.0f%%", healthPct * 100.0f);
+    Vec3 labelPos = barWorldPos;
+    labelPos.y += 1.2f;  // Above bar
+    WorldText3D::Print(labelPos, healthText, camera, 1.0f, 1.0f, 1.0f, GLUT_BITMAP_HELVETICA_10);
 }
 
 void Player::RefillFuel(float amount) {
@@ -187,6 +251,7 @@ void Player::Render(const Camera3D& camera) {
         r, g, b,
         false);
 
+    DrawHealthBarWorldSpace(position, health, maxHealth, camera);
     DrawFuelBarWorldSpace(position, fuel, maxFuel, camera);
 }
 

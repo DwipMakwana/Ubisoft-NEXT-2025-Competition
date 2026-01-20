@@ -16,8 +16,8 @@ void AIPlayerSystem::Init(PlanetSystem& planetSystem) {
     }
 }
 
-void AIPlayerSystem::Update(float deltaTime, PlanetSystem& planetSystem,
-    AIShipSystem& enemyShips, BulletSystem& bullets)
+void AIPlayerSystem::Update(float deltaTime, PlanetSystem& planetSystem, AIShipSystem& enemyShips,
+    BulletSystem& bulletSystem, Player& humanPlayer)
 {
     float dt = deltaTime / 1000.0f; // seconds
 
@@ -26,21 +26,11 @@ void AIPlayerSystem::Update(float deltaTime, PlanetSystem& planetSystem,
     for (int i = 0; i < MAX_AIPLAYERS; i++) {
         if (!players[i].active) continue;
 
-        UpdateAI(i, dt, planetSystem, enemyShips, bullets);
+        UpdateAI(i, dt, planetSystem, enemyShips, bulletSystem, humanPlayer);
 
         // Drag (frame-rate independent-ish) - LOWER drag value = LESS drag = FASTER
         players[i].velocity.x *= powf(players[i].drag, dt * 60.0f);
         players[i].velocity.y *= powf(players[i].drag, dt * 60.0f);
-
-        // REMOVE speed clamp temporarily for max speed - guards go FAST
-        /*
-        float speed = sqrtf(players[i].velocity.x * players[i].velocity.x +
-            players[i].velocity.y * players[i].velocity.y);
-        if (speed > players[i].maxSpeed && speed > 0.0001f) {
-            players[i].velocity.x = (players[i].velocity.x / speed) * players[i].maxSpeed;
-            players[i].velocity.y = (players[i].velocity.y / speed) * players[i].maxSpeed;
-        }
-        */
 
         // Integrate with seconds
         players[i].position.x += players[i].velocity.x * dt;
@@ -102,50 +92,90 @@ void AIPlayerSystem::SpawnForActivePlanets(PlanetSystem& planetSystem) {
 }
 
 void AIPlayerSystem::UpdateAI(int index, float dt, PlanetSystem planetSystem,
-    AIShipSystem enemyShips, BulletSystem bullets) {
-    AIPlayer& player = players[index];
+    AIShipSystem enemyShips, BulletSystem& bullets, Player& humanPlayer) {
+    
+    AIPlayer& guard = players[index];
     const Planet* planets = planetSystem.GetPlanets();
     const AIShip* ships = enemyShips.GetShips();
 
-    player.retargetTimer -= dt;
-    if (player.retargetTimer <= 0) {
-        player.targetShipIndex = FindNearestEnemyShip(player.position, player.homePlanetIndex, enemyShips);
-        player.retargetTimer = 0.1f;
+    guard.retargetTimer -= dt;
+    if (guard.retargetTimer <= 0) {
+        TargetInfo target = FindBestTarget(guard.position, guard.homePlanetIndex, 
+            enemyShips, humanPlayer);
+        
+        // Store target info in the guard
+        if (target.type != TargetType::NONE) {
+            guard.targetShipIndex = target.index;  // Reuse this field
+            guard.targetType = (int)target.type;   // Add this field to AIPlayer struct
+        } else {
+            guard.targetShipIndex = -1;
+        }
+        
+        guard.retargetTimer = 0.1f;
     }
 
     Vec3 targetPos;
-    bool hasTarget = (player.targetShipIndex >= 0 && player.targetShipIndex < enemyShips.GetMaxShips() && ships[player.targetShipIndex].active);
-
+    bool hasTarget = (guard.targetShipIndex >= 0);
+    
+    // Get target position based on type
     if (hasTarget) {
-        const AIShip& targetShip = ships[player.targetShipIndex];
-        targetPos = Vec3(targetShip.position.x, targetShip.position.y, 0);
-
-        // *** STEER BUT NO POSITION INTEGRATION ***
-        ApplyAISteering(&player, targetPos, dt, 140.0f, 80.0f);  // false = no position update
-
-        float dist = (targetPos - player.position).Length();
-
-        // *** PREDICTIVE AIM ***
-        Vec3 predTarget = targetPos + Vec3(targetShip.velocity.x * 0.5f, targetShip.velocity.y * 0.5f, 0);
-        player.aimAngle = atan2f(predTarget.y - player.position.y, predTarget.x - player.position.x) * 180.0f / 3.14159f;
-
-        if (player.shootCooldown <= 0.0f && dist <= 180.0f) {
-            float aimRad = player.aimAngle * 3.14159f / 180.0f;
-            Vec3 aimDir(cosf(aimRad), sinf(aimRad), 0);
-            bullets.ShootBullet(player.position, aimDir, player.homePlanetIndex);  // *** 3 ARGS ***
-            player.shootCooldown = 0.08f;
-            //Logger::LogFormat("GUARD %d SHOOTS ship %d (dist %.1f)", index, player.targetShipIndex, dist);
+        TargetType tType = (TargetType)guard.targetType;
+        Vec3 targetVel(0, 0, 0);
+        
+        if (tType == TargetType::SHIP) {
+            if (guard.targetShipIndex < enemyShips.GetMaxShips() && 
+                ships[guard.targetShipIndex].active) {
+                targetPos = ships[guard.targetShipIndex].position;
+                targetVel = ships[guard.targetShipIndex].velocity;
+            } else {
+                hasTarget = false;
+            }
+        }
+        else if (tType == TargetType::GUARD) {
+            if (guard.targetShipIndex < MAX_AIPLAYERS && 
+                players[guard.targetShipIndex].active) {
+                targetPos = players[guard.targetShipIndex].position;
+                targetVel = players[guard.targetShipIndex].velocity;
+            } else {
+                hasTarget = false;
+            }
+        }
+        else if (tType == TargetType::PLAYER) {
+            targetPos = humanPlayer.GetPosition();
+            targetVel = humanPlayer.GetVelocityVector();
+        }
+        
+        if (hasTarget) {
+            // Steer toward target
+            ApplyAISteering(&guard, targetPos, dt, 140.0f, 80.0f);
+            
+            float dist = (targetPos - guard.position).Length();
+            
+            // Predictive aim
+            Vec3 predTarget = targetPos + targetVel * 0.5f;
+            guard.aimAngle = atan2f(predTarget.y - guard.position.y, 
+                predTarget.x - guard.position.x) * 180.0f / 3.14159f;
+            
+            // Shoot if in range
+            if (guard.shootCooldown <= 0.0f && dist <= 180.0f) {
+                float aimRad = guard.aimAngle * 3.14159f / 180.0f;
+                Vec3 aimDir(cosf(aimRad), sinf(aimRad), 0);
+                bullets.ShootBullet(guard.position, aimDir, guard.homePlanetIndex);
+                guard.shootCooldown = 0.08f;
+            }
         }
     }
-    else {
-        const Planet& home = planets[player.homePlanetIndex];
+    
+    // No target - orbit home planet
+    if (!hasTarget) {
+        const Planet& home = planets[guard.homePlanetIndex];
         float orbitAngle = fmodf(home.currentRotation * 0.017f + dt * 0.3f, 6.283f);
         targetPos = Vec3(home.position.x + cosf(orbitAngle) * (home.size + 35.0f),
             home.position.y + sinf(orbitAngle) * (home.size + 35.0f), 0);
-        ApplyAISteering(&player, targetPos, dt, 100.0f, 50.0f);  // *** NO DOUBLE POS ***
+        ApplyAISteering(&guard, targetPos, dt, 100.0f, 50.0f);
     }
 
-    player.shootCooldown -= dt;
+    guard.shootCooldown -= dt;
 }
 
 void AIPlayerSystem::ApplyAISteering(AIPlayer* player, const Vec3 targetPos, float dt,
@@ -194,45 +224,70 @@ int AIPlayerSystem::FindFreePlayer()
     return 0;
 }
 
-int AIPlayerSystem::FindNearestEnemyShip(const Vec3& pos, int myHomePlanetIndex, AIShipSystem& enemyShips) {
-    const AIShip* ships = enemyShips.GetShips();
-    int bestGuardIdx = -1, bestWorkerIdx = -1;
-    float bestGuardDistSq = 999999.0f, bestWorkerDistSq = 999999.0f;
+TargetInfo AIPlayerSystem::FindBestTarget(const Vec3& pos, int myHomePlanetIndex,
+    AIShipSystem& enemyShips, Player& humanPlayer) {
 
+    TargetInfo best;
+    best.type = TargetType::NONE;
+    best.index = -1;
+    best.distanceSq = 999999.0f;
+
+    const AIShip* ships = enemyShips.GetShips();
+
+    // 1. Check enemy guards (OTHER AI players)
+    for (int i = 0; i < MAX_AIPLAYERS; i++) {
+        if (!players[i].active) continue;
+        if (players[i].homePlanetIndex == myHomePlanetIndex) continue;  // Skip allies
+
+        float dx = players[i].position.x - pos.x;
+        float dy = players[i].position.y - pos.y;
+        float distSq = dx * dx + dy * dy;
+
+        if (distSq < best.distanceSq && distSq < 40000.0f) {  // 200 unit range
+            best.type = TargetType::GUARD;
+            best.index = i;
+            best.distanceSq = distSq;
+            best.position = players[i].position;
+            best.velocity = players[i].velocity;
+        }
+    }
+
+    // 2. Check human player (planet 0)
+    if (myHomePlanetIndex != 0) {  // Don't attack player if we're on their team
+        float dx = humanPlayer.GetPosition().x - pos.x;
+        float dy = humanPlayer.GetPosition().y - pos.y;
+        float distSq = dx * dx + dy * dy;
+
+        if (distSq < best.distanceSq && distSq < 40000.0f) {
+            best.type = TargetType::PLAYER;
+            best.index = 0;
+            best.distanceSq = distSq;
+            best.position = humanPlayer.GetPosition();
+            best.velocity = humanPlayer.GetVelocityVector();
+        }
+    }
+
+    // 3. Check enemy ships (existing logic)
     for (int i = 0; i < enemyShips.GetMaxShips(); i++) {
         if (!ships[i].active) continue;
 
         int shipPlanet = ships[i].parentPlanetIndex;
-
-        // *** FIXED: Skip OWN planet + ALL HOME PLANET SHIPS (0) ***
-        if (shipPlanet == myHomePlanetIndex || shipPlanet == 0) {
-            //Logger::LogFormat("Guard SKIP ship %d (planet=%d)", i, shipPlanet);
-            continue;
-        }
+        if (shipPlanet == myHomePlanetIndex || shipPlanet == 0) continue;  // Skip allies
 
         float dx = ships[i].position.x - pos.x;
         float dy = ships[i].position.y - pos.y;
         float distSq = dx * dx + dy * dy;
 
-        if (shipPlanet > 0) {  // Enemy planet ships = priority guards
-            if (distSq < bestGuardDistSq) {
-                bestGuardDistSq = distSq;
-                bestGuardIdx = i;
-            }
-        }
-        else if (distSq < bestWorkerDistSq) {
-            bestWorkerDistSq = distSq;
-            bestWorkerIdx = i;
+        if (distSq < best.distanceSq && distSq < 40000.0f) {
+            best.type = TargetType::SHIP;
+            best.index = i;
+            best.distanceSq = distSq;
+            best.position = ships[i].position;
+            best.velocity = ships[i].velocity;
         }
     }
 
-    int target = (bestGuardIdx != -1 && bestGuardDistSq < 40000.0f) ? bestGuardIdx :
-        (bestWorkerIdx != -1 && bestWorkerDistSq < 40000.0f) ? bestWorkerIdx : -1;
-
-    //Logger::LogFormat("GUARD target=%d (guard %.1f, worker %.1f)", target,
-        //bestGuardIdx != -1 ? sqrtf(bestGuardDistSq) : -1.0f,
-        //bestWorkerIdx != -1 ? sqrtf(bestWorkerDistSq) : -1.0f);
-    return target;
+    return best;
 }
 
 void AIPlayerSystem::Render(const Camera3D& camera) {

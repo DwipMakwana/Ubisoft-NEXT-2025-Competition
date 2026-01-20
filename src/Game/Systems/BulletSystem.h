@@ -1,5 +1,5 @@
 //-----------------------------------------------------------------------------
-// BulletSystem.h - Player bullet shooting system
+// BulletSystem.h - Player bullet shooting system (FIXED)
 //-----------------------------------------------------------------------------
 #ifndef BULLETSYSTEM_H
 #define BULLETSYSTEM_H
@@ -11,6 +11,7 @@
 class AIShipSystem;
 class AIPlayerSystem;
 class AsteroidSystem;
+class Player;
 
 struct Bullet
 {
@@ -30,23 +31,21 @@ public:
 
     void Init();
     void Update(float deltaTime, AIShipSystem* aiShips, AIPlayerSystem* aiPlayers,
-        AsteroidSystem* asteroidSystem, PlanetSystem* planetSystem);
+        AsteroidSystem* asteroidSystem, PlanetSystem* planetSystem, Player* humanPlayer);
     void Render(const Camera3D& camera);
 
-    // Shooting
-    void ShootBullet(const Vec3& playerPos, const Vec3& direction, int playerHomePlanet);
+    // Shooting (no cooldown - caller manages their own cooldown)
+    void ShootBullet(const Vec3& shooterPos, const Vec3& direction, int shooterHomePlanet);
 
 private:
-    static const int MAX_BULLETS = 1000;
+    static const int MAX_BULLETS = 2000;
+    int nextBulletSlot = 0;
     Bullet bullets[MAX_BULLETS];
 
     // Helpers
     int FindFreeBullet();
     void CheckCollisions(AIShipSystem* aiShips, AIPlayerSystem* aiPlayers,
-        AsteroidSystem* asteroidSystem, PlanetSystem* planetSystem);
-
-    float fireRateCooldown = 0.0f;
-    float fireRateInterval = 0.15f;
+        AsteroidSystem* asteroidSystem, PlanetSystem* planetSystem, Player* humanPlayer);
 };
 
 #endif

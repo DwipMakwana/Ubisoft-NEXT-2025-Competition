@@ -65,7 +65,7 @@ void Update(float deltaTime) {
     GameState_Update(deltaTime);
 
     if (gamePaused)
-		return;
+        return;
 
     player.Update(deltaTime);
 
@@ -87,11 +87,18 @@ void Update(float deltaTime) {
     camera3D.SetTarget(Vec3(newCameraPos.x, newCameraPos.y, 0));
     camera3D.SetUp(Vec3(0, 1, 0));
 
-    // SHOOT (Left Click)
-    if (App::IsKeyPressed(App::KEY_SPACE))
+    // FIXED: Player cooldown managed here
+    static float playerShootCooldown = 0.0f;
+    if (playerShootCooldown > 0.0f) {
+        playerShootCooldown -= dt;
+    }
+
+    // SHOOT (Spacebar with cooldown)
+    if (App::IsKeyPressed(App::KEY_SPACE) && playerShootCooldown <= 0.0f)
     {
         Vec3 shootDir = player.GetAimDirection();
         bulletSystem.ShootBullet(player.GetPosition(), shootDir, playerHomePlanet);
+        playerShootCooldown = 0.15f;  // Player fire rate
     }
 
     // Update systems IN RIGHT ORDER
@@ -101,9 +108,8 @@ void Update(float deltaTime) {
     uiManager.Update(deltaTime);
 
     aiShips.Update(deltaTime, planetSystem, asteroidSystem);  // Ships first
-    aiPlayers.Update(deltaTime, planetSystem, aiShips, bulletSystem);  // Then guards*/
-
-    bulletSystem.Update(deltaTime, &aiShips, &aiPlayers, &asteroidSystem, &planetSystem);
+    bulletSystem.Update(deltaTime, &aiShips, &aiPlayers, &asteroidSystem, &planetSystem, &player);
+    aiPlayers.Update(deltaTime, planetSystem, aiShips, bulletSystem, player);  // Then guards
 
     Vec3 playerPush;
     asteroidSystem.ResolveExternalCollision(player.GetPosition(), 1.2f,

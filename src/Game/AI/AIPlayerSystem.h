@@ -20,6 +20,7 @@ struct AIPlayer {
     // AI state
     int homePlanetIndex = 0;
     int targetShipIndex = -1;
+    int targetType = 0;  // NEW: 0=none, 1=ship, 2=guard, 3=player
     float retargetTimer = 0.0f;
     float shootCooldown = 0.0f;
     Vec3 patrolTarget;
@@ -33,15 +34,33 @@ struct AIPlayer {
     float hitComboTimer = 0.0f;
 };
 
+// Forward declarations for targeting system
+enum class TargetType {
+    NONE,
+    SHIP,
+    GUARD,
+    PLAYER
+};
+
+struct TargetInfo {
+    TargetType type;
+    int index;
+    float distanceSq;
+    Vec3 position;
+    Vec3 velocity;
+};
+
 class AIPlayerSystem {
 public:
     AIPlayerSystem();
     void Init(PlanetSystem& planetSystem);
     void SpawnForActivePlanets(PlanetSystem& planetSystem);
-    void Update(float deltaTime, PlanetSystem& planetSystem, AIShipSystem& enemyShips, BulletSystem& bullets);
+    void Update(float deltaTime, PlanetSystem& planetSystem, AIShipSystem& enemyShips,
+        BulletSystem& bulletSystem, Player& humanPlayer);
     void Render(const Camera3D& camera);
 
-    void OnPlayerHit(int playerIndex, AsteroidSystem* asteroidSystem, PlanetSystem* planetSystem, int killerHomePlanet);
+    void OnPlayerHit(int playerIndex, AsteroidSystem* asteroidSystem,
+        PlanetSystem* planetSystem, int killerHomePlanet);
     AIPlayer* GetPlayers() { return players; }
     int GetMaxPlayers() const { return MAX_AIPLAYERS; }
 
@@ -53,9 +72,10 @@ private:
         float maxSpeed, float accel, bool updatePosition = true);
 
     int FindFreePlayer();
-    int FindNearestEnemyShip(const Vec3& pos, int myHomePlanetIndex, AIShipSystem& enemyShips);
+    TargetInfo FindBestTarget(const Vec3& pos, int myHomePlanetIndex,
+        AIShipSystem& enemyShips, Player& humanPlayer);
     void UpdateAI(int index, float dt, PlanetSystem planetSystem,
-        AIShipSystem enemyShips, BulletSystem bullets);
+        AIShipSystem enemyShips, BulletSystem& bullets, Player& humanPlayer);
 };
 
 #endif

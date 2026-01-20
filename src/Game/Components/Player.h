@@ -33,12 +33,20 @@ private:
     float maxFuel = 100.0f;
     float fuelConsumptionRate = 0.5f;  // Per second at max speed
 
+    // Health system
+    float health = 100.0f;
+    float maxHealth = 100.0f;
+    bool isDead = false;
+    float respawnTimer = 0.0f;
+    float respawnDelay = 1.0f;  // 3 seconds to respawn
+
 public:
     Player();
 
     void Init();
     void Update(float deltaTime);
     void DrawFuelBarWorldSpace(Vec3 playerPos, float fuel, float maxFuel, const Camera3D& camera);
+    void DrawHealthBarWorldSpace(Vec3 playerPos, float health, float maxHealth, const Camera3D& camera);
     void DrawResourceBar(const Vec3& worldPos, float value, const Camera3D& camera, float r, float g, float b);
     void Render(const Camera3D& camera);
 
@@ -63,6 +71,14 @@ public:
     float GetFuel() const { return fuel; }
     void RefillFuel(float amount);
     void UpdateFuel(bool isThrusting, float dtSeconds);
+
+    // Health methods
+    void TakeDamage(float damage);
+    void Die();
+    void Respawn();
+    bool IsDead() const { return isDead; }
+    float GetHealth() const { return health; }
+    void UpdateRespawn(float deltaTime);
 };
 
 #endif

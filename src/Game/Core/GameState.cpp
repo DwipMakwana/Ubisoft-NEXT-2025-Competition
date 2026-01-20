@@ -27,6 +27,7 @@ void GameState_Update(float deltaTime) {
     UIManager::RemoveText("menu_title");
     UIManager::RemoveText("menu_play");
     UIManager::RemoveText("menu_quit");
+    UIManager::RemoveText("menu_desc");
 
     if (currentState == GameState::MAIN_MENU) {
         gamePaused = true;  // Pause game logic
@@ -43,7 +44,7 @@ void GameState_Update(float deltaTime) {
         UIManager::AddText("menu_quit", 100, 400, quitText, 1.0f, 0.0f, 0.0f, GLUT_BITMAP_HELVETICA_12);
 
 		// Description
-        UIManager::AddText("menu_desc", 100, 200, "Try to save your planet and maintian the resources, have fun!", 1.0f, 1.0f, 1.0f, GLUT_BITMAP_HELVETICA_10);
+        UIManager::AddText("menu_desc", 100, 200, "Try to save your planet and maintian the resources, have fun!", 1.0f, 1.0f, 1.0f, GLUT_BITMAP_HELVETICA_12);
 
     }
     else if (currentState == GameState::PLAYING) {
@@ -81,6 +82,7 @@ void GameState_HandleInput() {
         if (App::IsKeyPressed(App::KEY_ESC)) {
             currentState = GameState::PAUSED;
             gamePaused = true;
+            UIManager::AddText("pause", APP_INIT_WINDOW_WIDTH / 2, APP_INIT_WINDOW_HEIGHT / 2 + 200, "PAUSED!", 1.0f, 1.0f, 1.0f, GLUT_BITMAP_HELVETICA_18);
             //Logger::LogInfo("Returning to main menu");
         }
     }
@@ -88,6 +90,7 @@ void GameState_HandleInput() {
         if (App::IsKeyPressed(App::KEY_ESC)) {
             currentState = GameState::PLAYING;
             gamePaused = false;
+            UIManager::RemoveText("pause");
             //Logger::LogInfo("Returning to main menu");
         }
     }
