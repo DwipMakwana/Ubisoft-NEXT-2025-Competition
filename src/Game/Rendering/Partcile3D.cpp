@@ -1,238 +1,137 @@
-//-----------------------------------------------------------------------------
-// Particle3D.cpp - 3D billboarded particles WITHOUT back-face culling
-//-----------------------------------------------------------------------------
-#include "../Rendering/Particle3D.h"
-#include "../Rendering/Renderer3D.h"
-#include "../Utilities/Logger.h"
-#include "App.h"
-#include <cstdlib>
-#include <cmath>
-#include <algorithm>
+#include "Particle3D.h"
+#include "Renderer3D.h"
 
-ParticleSystem3D::ParticleSystem3D(int maxPart)
-    : maxParticles(maxPart)
-    , emitAccumulator(0.0f)
-    , emitVelocity(0, 2, 0)
-    , emitVelocityVariance(1, 1, 1)
-    , gravity(0, -5, 0)
-    , startColor(1, 0.8f, 0.3f)
-    , endColor(0.5f, 0.1f, 0.1f)
-    , startSize(0.05f)
-    , endSize(0.05f)
-    , lifeTime(2.0f)
-    , lifeTimeVariance(0.5f)
-    , useGravity(true)
-{
-    particles.resize(maxParticles);
-    //Logger::LogFormat("ParticleSystem3D created with %d max particles\n", maxParticles);
+static unsigned int fastRngState = 123456789;
+
+ParticleSystem3D::ParticleSystem3D(int maxParticles)
+    : nextParticleSlot(0), emitAccumulator(0.0f), activeCount(0) {
+
+    for (int i = 0; i < MAX_PARTICLES; i++) {
+        particles[i].active = false;
+    }
+
+    // Thruster-optimized defaults
+    startColor = Vec3(1.0f, 0.6f, 0.1f);
+    endColor = Vec3(0.8f, 0.2f, 0.05f);
+    startSize = 0.8f;
+    endSize = 0.1f;
+    lifeTime = 0.4f;
+    lifeTimeVariance = 0.1f;
+    gravity = Vec3(0, -8.0f, 0);
+    emitVelocity = Vec3(0, 0, 0);
+    emitVelocityVariance = Vec3(3.0f, 3.0f, 1.0f);
+    useGravity = true;
+}
+
+inline float FastRandom() {
+    fastRngState = fastRngState * 1103515245u + 12345u;
+    return (float)(fastRngState & 0x7FFFFFFFu) / 2147483647.0f;
+}
+
+void ParticleSystem3D::EmitContinuous(const Vec3& position, float particlesPerSecond, float dt) {
+    emitAccumulator += particlesPerSecond * dt;
+
+    while (emitAccumulator >= 1.0f && activeCount < MAX_PARTICLES) {
+        BillboardParticle& p = particles[nextParticleSlot];
+
+        // Full Vec3 velocity with randomization
+        p.position = position;
+        p.velocity.x = emitVelocity.x + (FastRandom() * 2.0f - 1.0f) * emitVelocityVariance.x;
+        p.velocity.y = emitVelocity.y + (FastRandom() * 2.0f - 1.0f) * emitVelocityVariance.y;
+        p.velocity.z = emitVelocity.z + (FastRandom() * 2.0f - 1.0f) * emitVelocityVariance.z;
+
+        p.lifetime = 0.0f;
+        p.maxLifetime = lifeTime + FastRandom() * lifeTimeVariance;
+        p.active = true;
+
+        nextParticleSlot = (nextParticleSlot + 1) % MAX_PARTICLES;
+        activeCount++;
+        emitAccumulator -= 1.0f;
+    }
 }
 
 void ParticleSystem3D::Update(float deltaTime) {
-    for (auto& p : particles) {
-        if (!p.active) continue;
+    float dt = deltaTime / 1000.0f;
+    int slot = nextParticleSlot;
+    int count = activeCount;
 
-        p.life -= deltaTime;
-        if (p.life <= 0.0f) {
-            p.active = false;
+    for (int i = 0; i < MAX_PARTICLES; i++) {
+        if (!particles[slot].active) {
+            slot = (slot + 1) % MAX_PARTICLES;
             continue;
         }
 
-        if (useGravity) {
-            p.velocity.x += gravity.x * deltaTime;
-            p.velocity.y += gravity.y * deltaTime;
-            p.velocity.z += gravity.z * deltaTime;
+        BillboardParticle& p = particles[slot];
+        p.lifetime += dt;
+
+        if (p.lifetime >= p.maxLifetime) {
+            p.active = false;
+            count--;
+        }
+        else {
+            // Full 3D physics
+            p.position.x += p.velocity.x * dt;
+            p.position.y += p.velocity.y * dt;
+            p.position.z += p.velocity.z * dt;
+
+            // Apply gravity (Vec3)
+            if (useGravity) {
+                p.velocity.x += gravity.x * dt;
+                p.velocity.y += gravity.y * dt;
+                p.velocity.z += gravity.z * dt;
+            }
+
+            // Branchless interpolation
+            float t = p.lifetime / p.maxLifetime;
+            p.size = startSize * (1.0f - t) + endSize * t;
+            p.color.x = startColor.x * (1.0f - t) + endColor.x * t;
+            p.color.y = startColor.y * (1.0f - t) + endColor.y * t;
+            p.color.z = startColor.z * (1.0f - t) + endColor.z * t;
         }
 
-        p.position.x += p.velocity.x * deltaTime;
-        p.position.y += p.velocity.y * deltaTime;
-        p.position.z += p.velocity.z * deltaTime;
-
-        float t = 1.0f - (p.life / p.maxLife);
-        p.color.x = startColor.x + (endColor.x - startColor.x) * t;
-        p.color.y = startColor.y + (endColor.y - startColor.y) * t;
-        p.color.z = startColor.z + (endColor.z - startColor.z) * t;
-        p.size = startSize + (endSize - startSize) * t;
-    }
-}
-
-void ParticleSystem3D::RenderBillboard(const Vec3& position, float size, const Vec3& color, const Camera3D& camera) {
-    // Get camera basis vectors for billboarding
-    Vec3 forward = camera.GetForward();
-    Vec3 right = camera.GetRight();
-    Vec3 up = right.Cross(forward).Normalized();
-
-    // Create billboard quad facing camera
-    float halfSize = size * 0.5f;
-    
-    Vec3 v1 = position + (right * -halfSize) + (up * -halfSize);
-    Vec3 v2 = position + (right * halfSize) + (up * -halfSize);
-    Vec3 v3 = position + (right * halfSize) + (up * halfSize);
-    Vec3 v4 = position + (right * -halfSize) + (up * halfSize);
-
-    // Project all vertices to NDC manually to bypass back-face culling
-    Vec4 ndc1 = camera.WorldToNDC(v1);
-    Vec4 ndc2 = camera.WorldToNDC(v2);
-    Vec4 ndc3 = camera.WorldToNDC(v3);
-    Vec4 ndc4 = camera.WorldToNDC(v4);
-
-    // Skip if behind camera
-    if (ndc1.w < camera.GetNearPlane() || 
-        ndc2.w < camera.GetNearPlane() ||
-        ndc3.w < camera.GetNearPlane() ||
-        ndc4.w < camera.GetNearPlane()) {
-        return;
+        slot = (slot + 1) % MAX_PARTICLES;
     }
 
-    // Convert to screen space
-    float x1 = (ndc1.x + 1.0f) * APP_VIRTUAL_WIDTH * 0.5f;
-    float y1 = (ndc1.y + 1.0f) * APP_VIRTUAL_HEIGHT * 0.5f;
-    float x2 = (ndc2.x + 1.0f) * APP_VIRTUAL_WIDTH * 0.5f;
-    float y2 = (ndc2.y + 1.0f) * APP_VIRTUAL_HEIGHT * 0.5f;
-    float x3 = (ndc3.x + 1.0f) * APP_VIRTUAL_WIDTH * 0.5f;
-    float y3 = (ndc3.y + 1.0f) * APP_VIRTUAL_HEIGHT * 0.5f;
-    float x4 = (ndc4.x + 1.0f) * APP_VIRTUAL_WIDTH * 0.5f;
-    float y4 = (ndc4.y + 1.0f) * APP_VIRTUAL_HEIGHT * 0.5f;
-
-    // Draw directly using App::DrawTriangle to bypass back-face culling
-    // Triangle 1: v1, v2, v3
-    App::DrawTriangle(
-        x1, y1, ndc1.z, 1.0f,
-        x2, y2, ndc2.z, 1.0f,
-        x3, y3, ndc3.z, 1.0f,
-        color.x, color.y, color.z,
-        color.x, color.y, color.z,
-        color.x, color.y, color.z,
-        false
-    );
-
-    // Triangle 2: v1, v3, v4
-    App::DrawTriangle(
-        x1, y1, ndc1.z, 1.0f,
-        x3, y3, ndc3.z, 1.0f,
-        x4, y4, ndc4.z, 1.0f,
-        color.x, color.y, color.z,
-        color.x, color.y, color.z,
-        color.x, color.y, color.z,
-        false
-    );
+    nextParticleSlot = slot;
+    activeCount = count;
 }
 
 void ParticleSystem3D::Render(const Camera3D& camera) {
-    struct ParticleDepth {
-        const Particle3D* particle;
-        float depth;
-    };
-    
-    std::vector<ParticleDepth> sortedParticles;
-    sortedParticles.reserve(maxParticles);
-
+    // Cache camera vectors
+    Vec3 camRight = camera.GetRight();
+    Vec3 camUp = camera.GetUp();
     Vec3 camPos = camera.GetPosition();
-    
-    for (const auto& p : particles) {
-        if (!p.active) continue;
 
-        Vec3 diff = p.position - camPos;
-        float distSq = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
-        
-        sortedParticles.push_back({ &p, distSq });
+    float cullDistSq = 100.0f * 100.0f;
+
+    for (int i = 0; i < MAX_PARTICLES; i++) {
+        if (!particles[i].active) continue;
+
+        BillboardParticle& p = particles[i];
+
+        // Fast distance culling
+        float dx = p.position.x - camPos.x;
+        float dy = p.position.y - camPos.y;
+        float dz = p.position.z - camPos.z;
+        if (dx * dx + dy * dy + dz * dz > cullDistSq) continue;
+
+        float halfSize = p.size * 0.5f;
+
+        // Billboard quad (camera-facing)
+        Vec3 v1 = p.position + camRight * halfSize + camUp * halfSize;
+        Vec3 v2 = p.position + camRight * halfSize - camUp * halfSize;
+        Vec3 v3 = p.position - camRight * halfSize - camUp * halfSize;
+        Vec3 v4 = p.position - camRight * halfSize + camUp * halfSize;
+
+        // Two triangles
+        Renderer3D::DrawTriangle3D(v1, v2, v3, camera,
+            p.color.x, p.color.y, p.color.z,
+            p.color.x, p.color.y, p.color.z,
+            p.color.x, p.color.y, p.color.z, false);
+
+        Renderer3D::DrawTriangle3D(v1, v3, v4, camera,
+            p.color.x, p.color.y, p.color.z,
+            p.color.x, p.color.y, p.color.z,
+            p.color.x, p.color.y, p.color.z, false);
     }
-
-    if (sortedParticles.empty()) return;
-
-    // Sort back to front
-    std::sort(sortedParticles.begin(), sortedParticles.end(),
-        [](const ParticleDepth& a, const ParticleDepth& b) {
-            return a.depth > b.depth;
-        });
-
-    // Render sorted particles as billboards
-    for (const auto& pd : sortedParticles) {
-        const Particle3D& p = *pd.particle;
-        RenderBillboard(p.position, p.size, p.color, camera);
-    }
-}
-
-void ParticleSystem3D::Emit(const Vec3& position, int count) {
-    for (int i = 0; i < count; i++) {
-        int index = FindInactiveParticle();
-        if (index >= 0) {
-            ActivateParticle(index, position);
-        }
-    }
-}
-
-void ParticleSystem3D::EmitExplosion(const Vec3& position, int count) {
-    //Logger::LogFormat("EXPLOSION: %d particles at (%.2f, %.2f, %.2f)\n",
-        //count, position.x, position.y, position.z);
-
-    for (int i = 0; i < count; i++) {
-        int index = FindInactiveParticle();
-        if (index < 0) {
-            //Logger::LogLine("WARNING: No inactive particles available!");
-            break;
-        }
-
-        Particle3D& p = particles[index];
-        p.position = position;
-        p.active = true;
-        p.maxLife = lifeTime + ((rand() % 1000 / 1000.0f) - 0.5f) * lifeTimeVariance;
-        p.life = p.maxLife;
-
-        float theta = (rand() % 1000 / 1000.0f) * 2.0f * PI;
-        float phi = (rand() % 1000 / 1000.0f) * PI;
-        float speed = 3.0f + (rand() % 1000 / 1000.0f) * 2.0f;
-
-        p.velocity.x = sinf(phi) * cosf(theta) * speed;
-        p.velocity.y = sinf(phi) * sinf(theta) * speed;
-        p.velocity.z = cosf(phi) * speed;
-
-        p.color = startColor;
-        p.size = startSize;
-    }
-    
-    //Logger::LogFormat("Explosion complete. Active: %d\n", GetActiveCount());
-}
-
-void ParticleSystem3D::EmitContinuous(const Vec3& position, float rate, float deltaTime) {
-    emitAccumulator += rate * deltaTime;
-    int toEmit = (int)emitAccumulator;
-    emitAccumulator -= toEmit;
-    
-    if (toEmit > 0) {
-        Emit(position, toEmit);
-    }
-}
-
-int ParticleSystem3D::GetActiveCount() const {
-    int count = 0;
-    for (const auto& p : particles) {
-        if (p.active) count++;
-    }
-    return count;
-}
-
-int ParticleSystem3D::FindInactiveParticle() {
-    for (int i = 0; i < maxParticles; i++) {
-        if (!particles[i].active) return i;
-    }
-    return -1;
-}
-
-void ParticleSystem3D::ActivateParticle(int index, const Vec3& position) {
-    Particle3D& p = particles[index];
-    p.position = position;
-    p.active = true;
-    p.maxLife = lifeTime + ((rand() % 1000 / 1000.0f) - 0.5f) * lifeTimeVariance;
-    p.life = p.maxLife;
-
-    float rx = ((rand() % 1000 / 1000.0f) - 0.5f) * 2.0f;
-    float ry = ((rand() % 1000 / 1000.0f) - 0.5f) * 2.0f;
-    float rz = ((rand() % 1000 / 1000.0f) - 0.5f) * 2.0f;
-
-    p.velocity.x = emitVelocity.x + rx * emitVelocityVariance.x;
-    p.velocity.y = emitVelocity.y + ry * emitVelocityVariance.y;
-    p.velocity.z = emitVelocity.z + rz * emitVelocityVariance.z;
-
-    p.color = startColor;
-    p.size = startSize;
 }

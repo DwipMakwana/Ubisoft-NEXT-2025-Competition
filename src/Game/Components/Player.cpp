@@ -1,6 +1,7 @@
 #include "Player.h"
 #include "Player.h"
 #include "Player.h"
+#include "Player.h"
 //------------------------------------------------------------------------
 // Player.cpp - Free movement implementation
 //------------------------------------------------------------------------
@@ -22,6 +23,15 @@ Player::Player()
     , size(0.8f)
 	, r(1.0f), g(1.0f), b(1.0f)  // White color
 {
+
+    // Fire trail settings (orange to red)
+    thrusterParticles = new ParticleSystem3D(200);
+    thrusterParticles->startColor = Vec3(1.0f, 0.6f, 0.1f);     // Orange
+    thrusterParticles->endColor = Vec3(0.8f, 0.2f, 0.05f);       // Dark orange
+    thrusterParticles->startSize = 0.8f;
+    thrusterParticles->endSize = 0.1f;
+    thrusterParticles->lifeTime = 0.2f;
+
 }
 
 void Player::Init() {
@@ -54,6 +64,11 @@ void Player::Respawn() {
     position = Vec3(0, -15.0f, 0.0f);  // Reset to spawn position
     velocity = Vec3(0, 0, 0);
     Logger::LogInfo("Player respawned!");
+}
+
+void Player::RefillHealth(float amount) {
+    health += amount;
+    if (health > 100.0f) health = 100.0f;  // Hard cap
 }
 
 void Player::UpdateRespawn(float deltaTime) {
@@ -125,6 +140,24 @@ void Player::Update(float deltaTime) {
     // Update position
     position.x += velocity.x * dt;
     position.y += velocity.y * dt;
+
+    // === THRUSTER PARTICLES ===
+    if (isThrusting && speed > 1.0f) {
+        // Spawn position: behind the ship
+        float angleRad = aimAngle * 3.14159f / 180.0f;
+        Vec3 thrusterOffset(-cosf(angleRad) * 1.5f, -sinf(angleRad) * 1.5f, 0);
+        Vec3 thrusterPos = position + thrusterOffset;
+
+        // Emit particles opposite to movement direction
+        Vec3 particleVel = velocity * -0.3f;  // Opposite direction, slower
+        thrusterParticles->emitVelocity = particleVel;
+
+        // Emit 2-3 particles per frame while thrusting
+        thrusterParticles->EmitContinuous(thrusterPos, 300.0f, dt);
+    }
+
+    // Update particle system
+    thrusterParticles->Update(deltaTime);
 
     // === MOUSE AIM ===
     float mouseX, mouseY;
@@ -238,6 +271,11 @@ void Player::DrawResourceBar(const Vec3& worldPos, float value, const Camera3D& 
 }
 
 void Player::Render(const Camera3D& camera) {
+    // Render thruster particles FIRST (behind ship)
+    if (!isDead) {
+        thrusterParticles->Render(camera);
+    }
+
     // Rotation to face mouse
     Vec3 rotation;
     rotation.x = 0.0f;

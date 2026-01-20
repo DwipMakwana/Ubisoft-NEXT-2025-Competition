@@ -32,6 +32,8 @@ struct AIPlayer {
     float health = 100.0f;
     int consecutiveHits = 0;
     float hitComboTimer = 0.0f;
+
+    ParticleSystem3D* thrusterParticles = nullptr;
 };
 
 // Forward declarations for targeting system

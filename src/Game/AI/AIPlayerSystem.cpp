@@ -35,6 +35,20 @@ void AIPlayerSystem::Update(float deltaTime, PlanetSystem& planetSystem, AIShipS
         // Integrate with seconds
         players[i].position.x += players[i].velocity.x * dt;
         players[i].position.y += players[i].velocity.y * dt;
+
+        // UPDATE THRUSTER PARTICLES!
+        if (players[i].thrusterParticles) {
+            float speed = players[i].velocity.Length();
+            if (speed > 5.0f) {  // Only emit when moving
+                float angleRad = players[i].aimAngle * 3.14159f / 180.0f;
+                Vec3 thrusterOffset(-cosf(angleRad) * 1.2f, -sinf(angleRad) * 1.2f, 0);
+                Vec3 thrusterPos = players[i].position + thrusterOffset;
+
+                players[i].thrusterParticles->emitVelocity = players[i].velocity * -0.2f;
+                players[i].thrusterParticles->EmitContinuous(thrusterPos, 50.0f, dt);
+            }
+            players[i].thrusterParticles->Update(deltaTime);
+        }
     }
 }
 
@@ -87,6 +101,16 @@ void AIPlayerSystem::SpawnForActivePlanets(PlanetSystem& planetSystem) {
             players[slot].shootCooldown = 0.0f;
             players[slot].aimAngle = 0.0f;
             players[slot].health = 100.0f;
+
+            // CREATE THRUSTER PARTICLES FOR AI!
+            if (players[slot].thrusterParticles == nullptr) {
+                players[slot].thrusterParticles = new ParticleSystem3D(300);
+                players[slot].thrusterParticles->startColor = Vec3(1.0f, 0.6f, 0.1f);     // Orange
+                players[slot].thrusterParticles->endColor = Vec3(0.8f, 0.2f, 0.05f);       // Dark orange
+                players[slot].thrusterParticles->startSize = 0.8f;
+                players[slot].thrusterParticles->endSize = 0.1f;
+                players[slot].thrusterParticles->lifeTime = 0.2f;
+            }
         }
     }
 }
@@ -294,6 +318,11 @@ void AIPlayerSystem::Render(const Camera3D& camera) {
     for (int i = 0; i < MAX_AIPLAYERS; i++) {
         if (!players[i].active) continue;
 
+        // Render particles FIRST (behind ship)
+        if (players[i].thrusterParticles) {
+            players[i].thrusterParticles->Render(camera);
+        }
+
         Vec3 rotation(0, 0, players[i].aimAngle - 90.0f);
         Vec3 scale(players[i].size, players[i].size, players[i].size);
 
@@ -347,7 +376,13 @@ void AIPlayerSystem::OnPlayerHit(int playerIndex, AsteroidSystem* asteroidSystem
         if (killerHomePlanet == 0) {  // Player home planet
             extern Player player;  // GameTest global ref
             player.RefillFuel(25.0f);
-            Logger::LogFormat("PLAYER REFUELED +25 fuel! (guard %d)", playerIndex);
+            player.RefillHealth(25.0f);
+        }
+
+        // CLEANUP PARTICLES!
+        if (player.thrusterParticles) {
+            delete player.thrusterParticles;
+            player.thrusterParticles = nullptr;
         }
 
         player.active = false;

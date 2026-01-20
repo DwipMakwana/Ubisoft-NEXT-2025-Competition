@@ -8,6 +8,7 @@
 #include "../Rendering/Camera3D.h"
 #include "../Rendering/Renderer3D.h"
 #include "../Rendering/Mesh3D.h"
+#include "../Rendering/Particle3D.h"
 
 class Player {
 private:
@@ -40,8 +41,11 @@ private:
     float respawnTimer = 0.0f;
     float respawnDelay = 1.0f;  // 3 seconds to respawn
 
+    ParticleSystem3D* thrusterParticles;
+
 public:
     Player();
+    ~Player() { delete thrusterParticles; }
 
     void Init();
     void Update(float deltaTime);
@@ -76,6 +80,7 @@ public:
     void TakeDamage(float damage);
     void Die();
     void Respawn();
+    void RefillHealth(float amount);
     bool IsDead() const { return isDead; }
     float GetHealth() const { return health; }
     void UpdateRespawn(float deltaTime);
