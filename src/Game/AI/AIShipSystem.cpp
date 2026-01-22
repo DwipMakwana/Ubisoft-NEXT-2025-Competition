@@ -1,5 +1,5 @@
 ﻿//-----------------------------------------------------------------------------
-// AIShipSystem.cpp - Planet-based AI towing ships
+// AIShipSystem.cpp
 //-----------------------------------------------------------------------------
 #include "AIShipSystem.h"
 #include "../Utilities/Logger.h"

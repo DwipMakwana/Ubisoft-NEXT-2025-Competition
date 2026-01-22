@@ -1,5 +1,5 @@
 //-----------------------------------------------------------------------------
-// AIShipSystem.h - Planet-based AI towing ships
+// AIShipSystem.h
 //-----------------------------------------------------------------------------
 #ifndef AISHIPSYSTEM_H
 #define AISHIPSYSTEM_H

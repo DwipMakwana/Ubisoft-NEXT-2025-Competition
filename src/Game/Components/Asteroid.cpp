@@ -138,7 +138,6 @@ void AsteroidSystem::GenerateSectorAsteroids(int sectorX, int sectorY) {
         a.position.y = centerY + offsetY;
         a.position.z = offsetZ;
 
-        // In GenerateSectorAsteroids, after setting a.position
         bool tooCloseToPlanet = false;
         for (int p = 0; p < planetSystemRef->GetMaxPlanets(); p++) {
             const Planet* planet = &planetSystemRef->GetPlanets()[p];
@@ -305,7 +304,7 @@ void AsteroidSystem::Update(float deltaTime,
         lastPlayerPos = playerPos;
     }
 
-    // NEW: Resolve asteroid-planet collisions (like player/ship external)
+    // Resolve asteroid-planet collisions (like player/ship external)
     for (int i = 0; i < MAX_ASTEROIDS; i++) {
         Asteroid& ast = asteroids[i];
         if (!ast.active || ast.isFragment || ast.isTowed) continue;  // Skip fragments/towed

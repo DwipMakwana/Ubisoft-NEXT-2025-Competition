@@ -36,7 +36,7 @@ void AIPlayerSystem::Update(float deltaTime, PlanetSystem& planetSystem, AIShipS
         players[i].position.x += players[i].velocity.x * dt;
         players[i].position.y += players[i].velocity.y * dt;
 
-        // UPDATE THRUSTER PARTICLES!
+        // UPDATED THRUSTER PARTICLES!
         if (players[i].thrusterParticles) {
             float speed = players[i].velocity.Length();
             if (speed > 5.0f) {  // Only emit when moving
